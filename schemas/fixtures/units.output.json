@@ -1,0 +1,123 @@
+{
+ "format": 1,
+ "platform": "android",
+ "idBits": 48,
+ "host": {
+  "file": "host.js",
+  "moduleIds": [
+   17637133336579,
+   20207481165758,
+   23771265305933,
+   26881601657240,
+   33181588206001,
+   74628956169626,
+   76338864143817,
+   91781228194686,
+   131040390644064,
+   147724073769717,
+   159268358068751,
+   161302759675744,
+   169246728182181,
+   171904140055096,
+   192150097797978,
+   196014227522597,
+   220545406288473,
+   224709119740397,
+   231672225344609,
+   233384706315639,
+   248320360310592,
+   261744357566135
+  ],
+  "packages": {
+   "@babel/runtime": "7.28.4",
+   "@react-native/js-polyfills": "0.78.3",
+   "lodash.get": "4.4.2",
+   "metro-runtime": "0.81.5",
+   "ms": "2.1.3"
+  },
+  "assets": []
+ },
+ "paths": {
+  "11960423920495": "cabs",
+  "154661352327660": "travelplex",
+  "262975416643773": "bus"
+ },
+ "units": {
+  "cabs": {
+   "file": "units/cabs.js",
+   "entryId": 11960423920495,
+   "entryPath": "src/units/cabs/entry.js",
+   "moduleIds": [
+    11960423920495,
+    205162907223944
+   ],
+   "packages": {},
+   "assets": []
+  },
+  "bus": {
+   "file": "units/bus.js",
+   "entryId": 262975416643773,
+   "entryPath": "src/units/bus/entry.js",
+   "moduleIds": [
+    191122484450394,
+    201180486466327,
+    262975416643773
+   ],
+   "packages": {},
+   "assets": []
+  },
+  "travelplex": {
+   "file": "units/travelplex.js",
+   "entryId": 154661352327660,
+   "entryPath": "src/units/travelplex/entry.js",
+   "moduleIds": [
+    154661352327660,
+    250407883015256
+   ],
+   "packages": {},
+   "assets": []
+  }
+ },
+ "cycles": {
+  "host": [],
+  "cabs": [],
+  "bus": [],
+  "travelplex": []
+ },
+ "warnings": [],
+ "checks": {
+  "single-import-site": {
+   "severity": "warn",
+   "count": 0
+  },
+  "cycles": {
+   "severity": "error",
+   "count": 0,
+   "total": 0,
+   "baselined": 0,
+   "asyncOnly": 0,
+   "thirdPartyHostCycles": 0,
+   "lazyUnitBoundaryCycles": 0
+  },
+  "dynamic-require": {
+   "severity": "error",
+   "count": 0,
+   "thirdPartyModules": []
+  },
+  "host-exports": {
+   "severity": "error",
+   "count": 0,
+   "unknown": 0
+  },
+  "public-api": {
+   "severity": "error",
+   "count": 0,
+   "packages": 0
+  },
+  "public-deep-import": {
+   "severity": "error",
+   "count": 0
+  }
+ },
+ "publicApi": {}
+}

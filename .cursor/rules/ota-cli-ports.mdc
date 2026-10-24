@@ -1,0 +1,11 @@
+---
+description: Rules for the deploy job, its ports and adapters (packages/ota-cli)
+globs: packages/ota-cli/**
+alwaysApply: false
+---
+- `src/job.ts` may depend **only** on `ota-core` and the ports in `src/ports.ts` (`ArtifactStorePort`, `CdnPort`, `SignerPort`, `TeamDirectoryPort`). Concrete adapters are wired only in `src/cli.ts`.
+- Every port method returns `T | Promise<T>`: **await every port call**.
+- Port invariants (see the JSDoc in `ports.ts`): state versions are immutable and create-if-absent; writes are atomic; `withLock` is a lease; CDN publish order is patches -> signature -> manifest; a signature mismatch seen by a reader is transient.
+- A new adapter must pass `test/conformance/*` (`runStoreConformance`, `runCdnConformance`) in both sync and async mode before use.
+- Authorization (`authorize` in ota-core): anyone requests, the unit's owner team approves, the approver is never the requester; `halt` needs no approval; break-glass requires the super-admin team and is flagged in the audit record.
+- Do not add behavior to the CLI that bypasses `runCommand`.

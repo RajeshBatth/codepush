@@ -1,0 +1,14 @@
+{
+  "package": "@travelplex/core",
+  "entry": "index.js",
+  "default": false,
+  "exports": [
+    "TravelplexEntry",
+    "getConfig",
+    "getSession",
+    "getUnreadCount",
+    "init",
+    "markRead",
+    "onEvent"
+  ]
+}

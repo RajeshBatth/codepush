@@ -1,0 +1,234 @@
+//diff_types.h
+//
+/*
+ The MIT License (MIT)
+ Copyright (c) 2012-2017 HouSisong
+ 
+ Permission is hereby granted, free of charge, to any person
+ obtaining a copy of this software and associated documentation
+ files (the "Software"), to deal in the Software without
+ restriction, including without limitation the rights to use,
+ copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the
+ Software is furnished to do so, subject to the following
+ conditions:
+ 
+ The above copyright notice and this permission notice shall be
+ included in all copies or substantial portions of the Software.
+ 
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+ OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+ HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ OTHER DEALINGS IN THE SOFTWARE.
+*/
+
+#ifndef HDiff_diff_types_h
+#define HDiff_diff_types_h
+#include "../HPatch/patch_types.h"
+#include <stdexcept> //std::runtime_error
+#include <utility> //std::pair
+#include <vector>
+
+#ifndef _IS_OUT_DIFF_INFO
+#   define  _IS_OUT_DIFF_INFO   1
+#endif
+#if (_IS_OUT_DIFF_INFO)
+extern int _hdiff_is_out_diff_info;
+#  define   _out_diff_info(...)  do{ if (_hdiff_is_out_diff_info) printf(__VA_ARGS__); } while(0)
+#else
+#  define   _out_diff_info(...)
+#endif
+
+#define hdiff_kFileIOBufBestSize (1024*512)
+namespace hdiff_private{
+
+    template<class TCover>
+    struct cover_cmp_by_new_t{
+        inline bool operator ()(const TCover& x,const TCover& y){
+            if (x.newPos!=y.newPos)
+                return x.newPos<y.newPos;
+            else
+                return x.length<y.length;
+        }
+        inline bool operator ()(const TCover* x,const TCover* y){
+            return operator ()(*x,*y);
+        }
+        inline bool operator ()(const TCover& x,const hpatch_StreamPos_t y_newPos){
+            return x.newPos<y_newPos;
+        }
+        inline bool operator ()(const hpatch_StreamPos_t x_newPos,const TCover& y){
+            return x_newPos<y.newPos;
+        }
+    };
+    template<class TCover>
+    struct cover_cmp_by_old_t{
+        inline bool operator ()(const TCover& x,const TCover& y){
+            if (x.oldPos!=y.oldPos)
+                return x.oldPos<y.oldPos;
+            else
+                return x.length<y.length;
+        }
+        inline bool operator ()(const TCover* x,const TCover* y){
+            return operator ()(*x,*y);
+        }
+        inline bool operator ()(const TCover& x,const hpatch_StreamPos_t y_oldPos){
+            return x.oldPos<y_oldPos;
+        }
+        inline bool operator ()(const hpatch_StreamPos_t x_oldPos,const TCover& y){
+            return x_oldPos<y.oldPos;
+        }
+    };
+    template<class TCover>
+    inline static bool cover_is_collinear(const TCover& x,const TCover& y){
+        return (x.oldPos+y.newPos==x.newPos+y.oldPos);
+    }
+
+    static const int kCoverMinMatchLen=5;
+
+    struct TAutoMem;
+    void loadOldAndNewStream(TAutoMem& out_mem,const hpatch_TStreamInput* oldStream,const hpatch_TStreamInput* newStream);
+
+}
+
+    //return whether x&y's datas are equal; if read stream fail,thorw std::runtime_error
+    hpatch_BOOL hdiff_streamDataIsEqual(const hpatch_TStreamInput* x,const hpatch_TStreamInput* y);
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
+    typedef hpatch_TStreamOutput hdiff_TStreamOutput;
+    typedef hpatch_TStreamInput  hdiff_TStreamInput;
+    //compress plugin
+    typedef struct hdiff_TCompress{
+        //return type tag; strlen(result)<=hpatch_kMaxPluginTypeLength; (Note:result lifetime)
+        const char*             (*compressType)(void);//ascii cstring,cannot contain '&'
+        //return the max compressed size, if input dataSize data;
+        hpatch_StreamPos_t (*maxCompressedSize)(hpatch_StreamPos_t dataSize);
+        //return support threadNumber
+        int          (*setParallelThreadNumber)(struct hdiff_TCompress* compressPlugin,int threadNum);
+        //compress data to out_code; return compressed size, if error or not need compress then return 0;
+        //if out_code->write() return hdiff_stream_kCancelCompress(error) then return 0;
+        //if memory I/O can use hdiff_compress_mem()
+        hpatch_StreamPos_t          (*compress)(const struct hdiff_TCompress* compressPlugin,
+                                                const hpatch_TStreamOutput*   out_code,
+                                                const hpatch_TStreamInput*    in_data);
+        const char*        (*compressTypeForDisplay)(void);//like compressType but just for display,can NULL
+    } hdiff_TCompress;
+    
+    static hpatch_inline
+    size_t hdiff_compress_mem(const hdiff_TCompress* compressPlugin,
+                              unsigned char* out_code,unsigned char* out_code_end,
+                              const unsigned char* data,const unsigned char* data_end){
+        hpatch_TStreamOutput codeStream;
+        hpatch_TStreamInput  dataStream;
+        mem_as_hStreamOutput(&codeStream,out_code,out_code_end);
+        mem_as_hStreamInput(&dataStream,data,data_end);
+        hpatch_StreamPos_t codeLen=compressPlugin->compress(compressPlugin,&codeStream,&dataStream);
+        if (codeLen!=(size_t)codeLen) return 0; //error
+        return (size_t)codeLen;
+    }
+
+    
+    struct IDiffSearchCoverListener{
+        bool (*limitCover)(struct IDiffSearchCoverListener* listener,
+                           const hpatch_TCover* cover,hpatch_StreamPos_t* out_leaveLen);
+        void (*limitCover_front)(struct IDiffSearchCoverListener* listener,
+                                 const hpatch_TCover* front_cover,hpatch_StreamPos_t* out_leaveLen);
+    };
+    struct IDiffResearchCover{
+        void (*researchCover)(struct IDiffResearchCover* diffi,struct IDiffSearchCoverListener* listener,size_t limitCoverIndex,
+                              hpatch_StreamPos_t sameCover_endPosBack,hpatch_StreamPos_t hitPos,hpatch_StreamPos_t hitLen);
+    };
+    struct IDiffInsertCover{
+        hpatch_TCover* (*insertCover)(IDiffInsertCover* diffi,const hpatch_TCover* pInsertCovers,size_t insertCoverCount);
+    };
+
+    static const int kDefaultMaxMatchDeepForLimit=6;
+    typedef struct{
+        hpatch_StreamPos_t beginPos;
+        hpatch_StreamPos_t endPos;
+    } hdiff_TRange;
+
+    struct ICoverLinesListener {
+        bool (*search_cover_limit)(ICoverLinesListener* listener,const hpatch_TCover* pcovers,size_t coverCount);
+        void (*research_cover)(ICoverLinesListener* listener,IDiffResearchCover* diffi,const hpatch_TCover* pcovers,size_t coverCount);
+        void (*insert_cover)(ICoverLinesListener* listener,IDiffInsertCover* diffi,hpatch_TCover* pcovers,size_t coverCount,
+                             hpatch_StreamPos_t* newSize,hpatch_StreamPos_t* oldSize);
+        void (*search_cover_finish)(ICoverLinesListener* listener,hpatch_TCover* pcovers,size_t* pcoverCount,
+                                    hpatch_StreamPos_t* newSize,hpatch_StreamPos_t* oldSize);
+        int (*get_max_match_deep)(const ICoverLinesListener* listener); //if null, default kDefaultMaxMatchDeepForLimit
+        // *search_block* for multi-thread parallel match,can null
+        void (*begin_search_block)(ICoverLinesListener* listener,hpatch_StreamPos_t newSize,
+                                   size_t searchBlockSize,size_t kPartPepeatSize);
+        hpatch_BOOL (*next_search_block_MT)(ICoverLinesListener* listener,hdiff_TRange* out_newRange);//must thread safe
+        hpatch_StreamPos_t (*get_limit_cover_length)(const ICoverLinesListener* listener); //if null, default kDefaultLimitCoverLen 
+    };
+
+    struct hdiff_TMTSets_s{ // used by $hdiff -s
+        size_t threadNum;
+        size_t threadNumForSearch; // NOTE: multi-thread search need frequent random disk read
+        bool   newDataIsMTSafe;
+        bool   oldDataIsMTSafe;
+    };
+
+    static const hdiff_TMTSets_s hdiff_TMTSets_s_kEmpty={1,1,false,false};
+
+
+#ifdef __cplusplus
+}
+#endif
+
+    typedef hpatch_TCover   TCover;
+    static inline void setCover(TCover& cover,hpatch_StreamPos_t oldPos,hpatch_StreamPos_t newPos,hpatch_StreamPos_t length) {
+                                          cover.oldPos=oldPos; cover.newPos=newPos; cover.length=length; }
+
+    // input covers
+    //  not owner memory, only reference memory
+    struct TInputCovers{
+        const TCover*   _covers;
+        size_t          _coverCount;
+        hpatch_force_inline TInputCovers(const TCover* covers,size_t coverCount)
+            :_covers(covers),_coverCount(coverCount){}
+        hpatch_force_inline TInputCovers(const std::vector<TCover>& covers)
+            :_covers(covers.data()),_coverCount(covers.size()){}
+        hpatch_force_inline size_t size()const{ return _coverCount; }
+        hpatch_force_inline const TCover& operator[](size_t index)const{ return _covers[index]; }
+    };
+    
+    void assert_covers_safe(const TInputCovers& covers,hpatch_StreamPos_t newSize,hpatch_StreamPos_t oldSize);
+
+    void collate_covers(std::vector<TCover>& covers,bool isCollateMerge=true);
+
+    //output covers
+    struct TOutputCovers{
+        hpatch_force_inline void push_cover(const TCover& cover){
+            covers.push_back(cover);
+        }
+        hpatch_force_inline void collate_covers(bool isCollateMerge=true){ // for support search covers by multi-thread
+            ::collate_covers(covers,isCollateMerge);
+        }
+        
+        inline TOutputCovers(std::vector<TCover>& _covers,bool isInitClear=true)
+         :covers(_covers){
+            if (isInitClear) covers.clear();
+        }
+    public:
+        std::vector<TCover>& covers;
+    };
+
+    struct TCachedNewOldStreams{
+        const hpatch_TStreamInput* newStream;
+        const hpatch_TStreamInput* oldStream;
+        void* import;
+        void (*freeCached)(void* import);
+        hpatch_force_inline TCachedNewOldStreams():newStream(0),oldStream(0),import(0),freeCached(0){}
+        hpatch_force_inline ~TCachedNewOldStreams(){ if (freeCached&&import) freeCached(import); }
+    };
+    
+#endif //HDiff_diff_types_h

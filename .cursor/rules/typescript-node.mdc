@@ -1,0 +1,12 @@
+---
+description: TypeScript conventions for packages run through Node type stripping (no build step)
+globs: packages/**/*.ts
+alwaysApply: false
+---
+- Node 24 runs `.ts` directly by **type stripping**: use only erasable syntax. No `enum`, `namespace`, parameter properties, or decorators. Use `import type` for types.
+- Import with explicit extensions: `import { x } from './y.ts'`. ESM only (`"type": "module"`).
+- Tests use `node:test` + `node:assert/strict`; file pattern `test/*.test.ts`; run with `npm test` in the package.
+- Typecheck with `node packages/ota-core/node_modules/typescript/bin/tsc --noEmit -p packages/ota-core/tsconfig.json` (it also covers `ota-cli`). Do not add a build step.
+- Dependencies are pinned to exact versions (no `^`/`~`). Add one only when unavoidable; install inside the package that needs it.
+- No `any` without a comment; prefer narrow types from `packages/ota-core/src/types.ts`.
+- Temp dirs in tests go under `.work/` (or `os.tmpdir()` via mkdtemp) and are removed in `after`.

@@ -1,0 +1,10 @@
+{
+  "entry": "index.js",
+  "metroConfig": "metro.config.js",
+  "checks": { "requireRegisterComponent": true },
+  "units": [
+    { "name": "cabs", "roots": ["src/units/cabs"], "entry": "src/units/cabs/entry.js" },
+    { "name": "bus", "roots": ["src/units/bus"], "entry": "src/units/bus/entry.js" },
+    { "name": "travelplex", "roots": ["src/units/travelplex"], "entry": "src/units/travelplex/entry.js" }
+  ]
+}

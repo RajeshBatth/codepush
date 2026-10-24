@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ota.example/schemas/patch-report.schema.json",
+  "title": "ota-build patch-report.json",
+  "description": "<patch out dir>/patch-report.json written by `ota-build patch` (packages/ota-build/src/patch.ts, interface PatchReport) next to the *.hdiff patch files, after a mandatory round trip through the shipped C++ apply. Consumed by `ota-build deploy-args`, which turns two reports (android + ios) into `ota-cli deploy` flags. NOT expressible: hostChanged/changedUnits/items consistency (hostChanged iff an item has unit \"host\"; changedUnits = the other item units), referenced patch files exist.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "platform", "appVersion", "base", "new", "baseSourceSha", "newSourceSha", "hostChanged", "changedUnits", "idsChanged", "items", "toolchain", "algo", "tools"],
+  "properties": {
+    "schema": { "const": 1, "description": "patch-report.json format version." },
+    "platform": { "enum": ["android", "ios"], "description": "Platform the patches are for." },
+    "appVersion": { "type": ["string", "null"], "description": "Binary release line shared by base and new build; null when unknown." },
+    "base": { "$ref": "#/$defs/hash", "description": "sha256 of the BASE build's build.json." },
+    "new": { "$ref": "#/$defs/hash", "description": "sha256 of the NEW build's build.json." },
+    "baseSourceSha": { "type": ["string", "null"], "description": "sourceSha of the base build." },
+    "newSourceSha": { "type": ["string", "null"], "description": "sourceSha of the new build." },
+    "hostChanged": { "type": "boolean", "description": "True if the host bundle differs." },
+    "changedUnits": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Names of units (not host) whose bundle differs." },
+    "idsChanged": { "type": "boolean", "description": "True if ids.json differs between base and new build." },
+    "items": {
+      "type": "array",
+      "description": "One item per changed file (host first, then units by name).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["unit", "patchFile", "patchSize", "updateType", "builtHash", "baseHash", "ratioOfZstdFull", "deltaPatchSize", "newZstdSize"],
+        "properties": {
+          "unit": { "type": "string", "minLength": 1, "description": "Unit name, or \"host\"." },
+          "patchFile": { "type": "string", "minLength": 1, "description": "Patch file name (*.hdiff) in the same directory as the report." },
+          "patchSize": { "type": "integer", "minimum": 0, "description": "Size of the chosen patch file in bytes." },
+          "updateType": { "enum": ["patch", "full"], "description": "`patch` (delta) or `full` (diff against an empty file, chosen when the delta exceeds fullThreshold x zstd size of the new file)." },
+          "builtHash": { "$ref": "#/$defs/hash", "description": "sha256 of the new bundle: what the device must obtain after applying (Entry.hash)." },
+          "baseHash": { "$ref": "#/$defs/hash", "description": "sha256 of the base bundle the patch applies to." },
+          "ratioOfZstdFull": { "type": "number", "minimum": 0, "description": "patchSize / newZstdSize, rounded to 4 decimals." },
+          "deltaPatchSize": { "type": "integer", "minimum": 0, "description": "Size of the delta patch even when `full` was chosen (information)." },
+          "newZstdSize": { "type": "integer", "minimum": 0, "description": "zstd size of the new bundle in bytes." }
+        }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rn", "metro", "hermescSha256", "hbcVersion", "hermescFlags"],
+      "description": "Toolchain of the new build (identical to the base's, enforced).",
+      "properties": {
+        "rn": { "type": "string", "minLength": 1, "description": "React Native version." },
+        "metro": { "type": "string", "minLength": 1, "description": "Metro version." },
+        "hermescSha256": { "$ref": "#/$defs/hash", "description": "sha256 of hermesc." },
+        "hbcVersion": { "type": "integer", "minimum": 1, "description": "Hermes bytecode version." },
+        "hermescFlags": { "type": "string", "description": "hermesc flags." }
+      }
+    },
+    "algo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["patchAlgoVer", "format", "compressor", "zstdLevel", "minMatchScore", "patchStepMemSize", "fullThreshold"],
+      "description": "Patch algorithm parameters (PATCH_ALGO in patch.ts); changing any needs a new patchAlgoVer.",
+      "properties": {
+        "patchAlgoVer": { "type": "string", "minLength": 1, "description": "Algorithm version, e.g. \"v1\"." },
+        "format": { "type": "string", "description": "Patch format description." },
+        "compressor": { "type": "string", "description": "Compressor, e.g. \"zstd\"." },
+        "zstdLevel": { "type": "integer", "description": "zstd compression level." },
+        "minMatchScore": { "type": "integer", "description": "HDiffPatch -m parameter." },
+        "patchStepMemSize": { "type": "integer", "description": "HDiffPatch step memory size." },
+        "fullThreshold": { "type": "number", "minimum": 0, "description": "Emit `full` when patchSize > fullThreshold x zstd size of the new file." }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hdiffz_tool", "ota_apply"],
+      "description": "Hashes of the native tools that produced and verified the patches.",
+      "properties": {
+        "hdiffz_tool": { "$ref": "#/$defs/hash", "description": "sha256 of the hdiffz_tool binary." },
+        "ota_apply": { "$ref": "#/$defs/hash", "description": "sha256 of the ota_apply binary used for the round trip." }
+      }
+    }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "\"sha256:\" + 64 lowercase hex chars." }
+  }
+}

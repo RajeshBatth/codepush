@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ota.example/schemas/ota-units-governance.schema.json",
+  "title": "OTA units governance config (ota-deployments units.json)",
+  "description": "The `units.json` at the root of the ota-deployments repo: who owns which unit, Jira project mapping and size limits. TypeScript type `UnitsConfig` in packages/ota-core/src/types.ts, validated by validateUnitsConfig(). Read by ota-cli (`--units`). NAME CLASH WARNING: this is NOT the unit-splitter's `units.json` build output (see units.output.schema.json) and NOT the splitter's input `units.config.json` (see units.config.schema.json). NOT expressible: a Jira project key may be mapped to only one unit (validateUnitsConfig checks it).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "superAdminTeam",
+    "acceptableTicketStatuses",
+    "defaultSoftLimit",
+    "defaultHardLimit",
+    "units"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional editor hint pointing at this schema; ignored by tools."
+    },
+    "superAdminTeam": {
+      "type": "string",
+      "minLength": 1,
+      "description": "GitHub team whose members may approve any command, including host-lane ones and break-glass."
+    },
+    "enforceJira": {
+      "type": "boolean",
+      "description": "Jira validation at verify time is OFF unless true (deferred; DESIGN.md 7.3)."
+    },
+    "acceptableTicketStatuses": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Jira statuses acceptable at verify time (only used when enforceJira is true)."
+    },
+    "defaultSoftLimit": {
+      "$ref": "#/$defs/sizeLimit",
+      "description": "Default soft size limit (warn) for units without their own softLimit."
+    },
+    "defaultHardLimit": {
+      "$ref": "#/$defs/sizeLimit",
+      "description": "Default hard size limit (block) for units without their own hardLimit."
+    },
+    "units": {
+      "type": "object",
+      "description": "Per-unit governance, keyed by unit name. Includes the special unit \"host\" (required).",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/unitConfig"
+      },
+      "required": [
+        "host"
+      ],
+      "properties": {
+        "host": {
+          "$ref": "#/$defs/unitConfig",
+          "description": "Governance of the special unit \"host\" (the main bundle, patched via the host lane). Required."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sizeLimit": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Either bound triggers the limit.",
+      "properties": {
+        "bytes": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Absolute limit in bytes of the patch/full payload."
+        },
+        "ratio": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Limit as a ratio of the unit's embedded base bundle zstd size, e.g. 0.3 = 30%."
+        }
+      }
+    },
+    "unitConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ownerTeam",
+        "jiraProjects"
+      ],
+      "properties": {
+        "ownerTeam": {
+          "type": "string",
+          "minLength": 1,
+          "description": "GitHub team whose members may approve this unit's commands."
+        },
+        "jiraProjects": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9]+$"
+          },
+          "description": "Jira project keys mapped to this unit, e.g. [\"TLX\"]. A key may appear in only one unit (not expressible)."
+        },
+        "softLimit": {
+          "$ref": "#/$defs/sizeLimit",
+          "description": "Overrides defaultSoftLimit for this unit."
+        },
+        "hardLimit": {
+          "$ref": "#/$defs/sizeLimit",
+          "description": "Overrides defaultHardLimit for this unit."
+        }
+      }
+    }
+  }
+}

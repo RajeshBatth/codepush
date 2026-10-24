@@ -1,0 +1,23 @@
+{
+  "stateVersion": 3,
+  "command": "rollout",
+  "unit": "cabs",
+  "patchId": "cabs-pr42",
+  "params": {
+    "percent": 10,
+    "platforms": [
+      "android",
+      "ios"
+    ]
+  },
+  "requester": "dev",
+  "approver": "alice",
+  "breakGlass": false,
+  "ticket": "CAB-1",
+  "pr": 42,
+  "sourceSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "jobUrl": "https://ci.example.com/job/ota-deploy/7",
+  "ts": "2026-01-01T00:00:00.000Z",
+  "previousVersion": 2,
+  "prevAuditHash": "sha256:282a48b3ff218a4ff951dd30205002ec1e71987252d7c690261addda55ff7ff6"
+}

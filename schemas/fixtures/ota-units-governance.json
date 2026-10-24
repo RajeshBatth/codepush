@@ -1,0 +1,44 @@
+{
+  "$schema": "../ota-units-governance.schema.json",
+  "superAdminTeam": "ota-super-admin",
+  "enforceJira": false,
+  "acceptableTicketStatuses": [
+    "In Progress"
+  ],
+  "defaultSoftLimit": {
+    "bytes": 100000
+  },
+  "defaultHardLimit": {
+    "bytes": 500000,
+    "ratio": 0.5
+  },
+  "units": {
+    "host": {
+      "ownerTeam": "ota-super-admin",
+      "jiraProjects": [
+        "COM"
+      ]
+    },
+    "cabs": {
+      "ownerTeam": "ota-cabs",
+      "jiraProjects": [
+        "CAB"
+      ],
+      "softLimit": {
+        "ratio": 0.2
+      }
+    },
+    "bus": {
+      "ownerTeam": "ota-bus",
+      "jiraProjects": [
+        "BUS"
+      ]
+    },
+    "travelplex": {
+      "ownerTeam": "ota-travelplex",
+      "jiraProjects": [
+        "TLX"
+      ]
+    }
+  }
+}

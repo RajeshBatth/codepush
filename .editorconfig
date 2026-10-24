@@ -1,0 +1,35 @@
+# https://editorconfig.org  (Cursor / VS Code: install the "EditorConfig" extension if it is not built in)
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.{c,cc,cpp,h,hpp}]
+indent_size = 2
+
+[CMakeLists.txt]
+indent_size = 2
+
+[*.{sh,bash}]
+indent_size = 2
+
+[*.{kt,java,gradle,swift,m,mm}]
+indent_size = 4
+
+[Makefile]
+indent_style = tab
+
+[*.md]
+trim_trailing_whitespace = false
+
+# generated / vendored: leave bytes alone
+[{schemas/fixtures/*.json,**/package-lock.json,native/third_party/**}]
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+indent_style = unset
+indent_size = unset

@@ -1,0 +1,14 @@
+{
+  "name": "two-package-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stand-in for the two-package LoB layout: PUBLIC host-owned @travelplex/core + PRIVATE patchable unit @travelplex/ui",
+  "dependencies": {
+    "@babel/runtime": "7.28.4",
+    "@travelplex/core": "1.0.0",
+    "@travelplex/ui": "1.0.0"
+  },
+  "devDependencies": {
+    "metro-runtime": "0.81.5"
+  }
+}

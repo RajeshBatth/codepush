@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ota.example/schemas/manifest.schema.json",
+  "title": "OTA signed manifest",
+  "description": "The manifest served to devices as <cdn>/<platform>/<appVersion>/manifest.json (canonical JSON: sorted keys, no whitespace; detached Ed25519 signature in manifest.json.sig). DESIGN.md section 6; TypeScript type `Manifest` in packages/ota-core/src/types.ts. Producer: ota-cli (applyDeploy/applyRollout/... in ota-core). Consumers: the native SDK, ota-cli verify. NOT expressible here (enforced by validateManifest() in ota-core): ranges inside one entry list must not overlap (sum of shares <= 1), ids unique across the whole manifest, requiresHost must equal a mainBundle entry id, range start <= end.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "platform", "appVersion", "patchAlgoVer", "version", "ttlSec", "mainBundle", "units"],
+  "properties": {
+    "schema": { "const": 1, "description": "Manifest format version. Always 1." },
+    "platform": { "enum": ["android", "ios"], "description": "Platform this manifest is for. Android and iOS manifests of one state version share `version` but differ in hashes." },
+    "appVersion": { "type": "string", "minLength": 1, "description": "Binary release line this manifest targets, e.g. \"11.9.0\"." },
+    "patchAlgoVer": { "type": "string", "minLength": 1, "description": "Patch algorithm version the device must support, e.g. \"v1\" (HDiffPatch single compressed diff, zstd)." },
+    "version": { "type": "integer", "minimum": 1, "description": "Monotonic per (platform, appVersion). Replay/downgrade protection: devices never accept a lower version." },
+    "ttlSec": { "type": "integer", "minimum": 1, "maximum": 86400, "description": "How long a device may cache this manifest before re-fetching, in seconds (1..86400)." },
+    "mainBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseHash", "entries"],
+      "description": "The host bundle (the 'host' unit): patches that apply to the embedded host bundle.",
+      "properties": {
+        "baseHash": { "$ref": "#/$defs/hash", "description": "Hash of the embedded host bundle these patches apply to." },
+        "entries": { "$ref": "#/$defs/entries" }
+      }
+    },
+    "units": {
+      "type": "array",
+      "description": "Per-unit patch ladders. A unit appears only once it has had at least one patch; unitName must be unique (not expressible).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["unitName", "baseHash", "entries"],
+        "properties": {
+          "unitName": { "type": "string", "minLength": 1, "description": "Unit name as in units.config.json, e.g. \"cabs\"." },
+          "baseHash": { "$ref": "#/$defs/hash", "description": "Hash of the embedded unit bundle this unit's patches apply to." },
+          "entries": { "$ref": "#/$defs/entries" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "\"sha256:\" followed by 64 lowercase hex characters."
+    },
+    "entries": {
+      "type": "array",
+      "description": "Ladder order: index 0 is the newest patch.",
+      "items": { "$ref": "#/$defs/entry" }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "patchUrl", "hash", "size", "updateType"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "description": "`<unit>-pr<N>` (N = ota-deployments PR number). Same for both platforms. Unique across the manifest (not expressible)." },
+        "patchUrl": { "type": "string", "minLength": 1, "description": "Absolute URL of the patch file on the CDN." },
+        "hash": { "$ref": "#/$defs/hash", "description": "sha256 of the BUILT result (patch applied to the embedded unit); verified on the device after applying." },
+        "size": { "type": "integer", "minimum": 1, "description": "Patch file size in bytes." },
+        "updateType": { "enum": ["patch", "full"], "description": "`patch`: delta against the embedded bundle. `full`: a complete bundle encoded as a patch against an empty file." },
+        "range": {
+          "type": "array",
+          "prefixItems": [
+            { "type": "number", "minimum": 0, "maximum": 1, "description": "Start (inclusive) of the bucket interval." },
+            { "type": "number", "minimum": 0, "maximum": 1, "description": "End (exclusive) of the bucket interval. Must be >= start (not expressible)." }
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "Half-open interval [start,end) over a device's bucket in [0,1). Absent = [0,1) (100%). [0,0] = deployed at 0%."
+        },
+        "requiresHost": {
+          "type": ["string", "null"],
+          "description": "Escape hatch for coupled releases: only usable if the VM booted with the mainBundle entry of this id. Must equal a mainBundle entry id (not expressible)."
+        }
+      }
+    }
+  }
+}

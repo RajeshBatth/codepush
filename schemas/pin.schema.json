@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ota.example/schemas/pin.schema.json",
+  "title": "OTA unit pin file",
+  "description": "ota-deployments repo: <appVersion>/<unit>.json pins the source of one unit for one release line to a release branch and a commit. TypeScript type `Pin`, helpers branchFor/validatePin/parsePinPath in packages/ota-core/src/pin.ts. NOT expressible: `branch` must equal `ota/<unit>/<appVersion>` for the unit and version taken from the file path (validatePin checks it).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["branch", "sha"],
+  "properties": {
+    "$schema": { "type": "string", "description": "Optional editor hint pointing at this schema; ignored by tools." },
+    "branch": { "type": "string", "pattern": "^ota/[a-z][a-z0-9-]*/[0-9]+\\.[0-9]+\\.[0-9]+$", "description": "Release branch `ota/<unit>/<appVersion>`." },
+    "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$", "description": "Full 40-character lowercase hex commit id the unit is built from." }
+  }
+}

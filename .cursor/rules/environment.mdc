@@ -1,0 +1,10 @@
+---
+description: Shell/environment quirks to know before running commands in this repo
+alwaysApply: false
+---
+- Subprocesses do not see `node`/`npm` (lazy nvm functions): `source scripts/env.sh` or `N=$(ls -d ~/.nvm/versions/node/v24*/bin); export PATH=$N:/opt/homebrew/bin:$PATH`.
+- Use `/usr/bin/clang(++)` explicitly for native builds (broken ccache symlinks in `/usr/local/bin`).
+- Scratch space is `.work/` (gitignored). Do not write to `/tmp`.
+- Aliases like `ls -> eza` can hang non-interactive shells: use `command ls`/`find` in scripts and heredoc-heavy commands.
+- Do not leave emulators, Gradle daemons (`./gradlew --stop`) or other long-running processes behind. Check disk (`df -h /`) before multi-GB builds.
+- `travel-app/` (if present in the working folder) is a different project: never touch or publish it.

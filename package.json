@@ -1,0 +1,19 @@
+{
+  "name": "ota-codepush-monorepo-tools",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "Root task runner only. NOT a workspace: each package under packages/ keeps its own package.json, lockfile and node_modules. Every script delegates to scripts/*.sh (bash, runnable from any cwd).",
+  "engines": { "node": ">=22.12" },
+  "scripts": {
+    "test": "bash scripts/test-all.sh",
+    "test:fast": "bash scripts/test-all.sh --fast",
+    "test:native": "bash scripts/test-all.sh --native",
+    "doctor": "bash scripts/doctor.sh",
+    "clean": "bash scripts/clean.sh",
+    "fetch-tools": "bash scripts/fetch-tools.sh",
+    "native:build": "bash scripts/native-build.sh",
+    "schemas:fixtures": "node scripts/gen-schema-fixtures.mjs",
+    "schemas:test": "cd packages/ota-core && node --test test/schemas.test.ts"
+  }
+}

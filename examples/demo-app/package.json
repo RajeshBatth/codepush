@@ -1,0 +1,14 @@
+{
+  "name": "demo-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tiny plain-JS stand-in for the org app: one host + three LoB units (see units.config.json)",
+  "dependencies": {
+    "@babel/runtime": "7.28.4",
+    "lodash.get": "4.4.2",
+    "ms": "2.1.3"
+  },
+  "devDependencies": {
+    "metro-runtime": "0.81.5"
+  }
+}

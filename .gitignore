@@ -1,0 +1,29 @@
+# Dependencies and generated output (never commit)
+node_modules/
+.work/
+.tools/
+native/build*/
+dist/
+.spike-assets/
+*.apk
+*.aab
+*.log
+
+# Native build output / caches
+.cxx/
+.gradle/
+**/android/app/build/
+**/android/build/
+**/ios/build/
+**/ios/Pods/
+**/DerivedData/
+*.xcuserstate
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/settings.json.example
+
+# NOT part of this project: a separate app that lives in the same working folder (has its own .git)
+travel-app/

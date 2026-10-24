@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ota.example/schemas/build.schema.json",
+  "title": "ota-build build.json",
+  "description": "<build dir>/build.json written by `ota-build bundle` (packages/ota-build/src/bundle.ts, interface BuildJson). Lists the Hermes bytecode files of a platform build with their hashes and the toolchain that made them. Consumed by `ota-build patch`, `base-info` and verifyBuildDir (which re-hashes every referenced file). Hashes here are \"sha256:\" + 64 hex. NOT expressible: referenced files exist and match their hash; host/unit toolchain versions agree.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "platform",
+    "appVersion",
+    "sourceSha",
+    "toolchain",
+    "host",
+    "units",
+    "ids",
+    "unitsMap"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1,
+      "description": "build.json format version."
+    },
+    "platform": {
+      "enum": [
+        "android",
+        "ios"
+      ],
+      "description": "Platform of this build."
+    },
+    "appVersion": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Binary release line (--app-version); null when not given."
+    },
+    "sourceSha": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Source commit (--source-sha); null when not given."
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rn",
+        "metro",
+        "hermescSha256",
+        "hbcVersion",
+        "hermescFlags"
+      ],
+      "description": "Toolchain identity; patches are only valid between builds with an identical toolchain.",
+      "properties": {
+        "rn": {
+          "type": "string",
+          "minLength": 1,
+          "description": "React Native version, e.g. \"0.78.3\"."
+        },
+        "metro": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Metro version used by the splitter, e.g. \"0.81.5\"."
+        },
+        "hermescSha256": {
+          "$ref": "#/$defs/hash",
+          "description": "sha256 of the hermesc binary."
+        },
+        "hbcVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Hermes bytecode version, e.g. 96."
+        },
+        "hermescFlags": {
+          "type": "string",
+          "description": "Exact hermesc flags, e.g. \"-O -emit-binary -g0\"."
+        }
+      }
+    },
+    "host": {
+      "$ref": "#/$defs/file",
+      "description": "The host bytecode bundle (host.hbc)."
+    },
+    "units": {
+      "type": "object",
+      "description": "Unit bytecode bundles keyed by unit name.",
+      "additionalProperties": {
+        "$ref": "#/$defs/unitFile"
+      }
+    },
+    "ids": {
+      "$ref": "#/$defs/ref",
+      "description": "ids.json (module id -> path) copied from the splitter."
+    },
+    "unitsMap": {
+      "$ref": "#/$defs/ref",
+      "description": "The splitter's output units.json (see units.output.schema.json), copied into the build dir."
+    }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "\"sha256:\" + 64 lowercase hex chars."
+    },
+    "file": {
+      "type": "object",
+      "required": [
+        "file",
+        "hash",
+        "size",
+        "zstdSize"
+      ],
+      "properties": {
+        "file": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Path relative to the build dir, e.g. \"host.hbc\" or \"units/cabs.hbc\"."
+        },
+        "hash": {
+          "$ref": "#/$defs/hash",
+          "description": "sha256 of the file bytes."
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "File size in bytes."
+        },
+        "zstdSize": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Size of the file zstd-compressed, in bytes (base for the size-ratio limits)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "hash"
+      ],
+      "properties": {
+        "file": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Path relative to the build dir."
+        },
+        "hash": {
+          "$ref": "#/$defs/hash",
+          "description": "sha256 of the file bytes."
+        }
+      }
+    },
+    "unitFile": {
+      "type": "object",
+      "required": [
+        "file",
+        "hash",
+        "size",
+        "zstdSize",
+        "entryModuleId"
+      ],
+      "properties": {
+        "file": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Path relative to the build dir, e.g. \"host.hbc\" or \"units/cabs.hbc\"."
+        },
+        "hash": {
+          "$ref": "#/$defs/hash",
+          "description": "sha256 of the file bytes."
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "File size in bytes."
+        },
+        "zstdSize": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Size of the file zstd-compressed, in bytes (base for the size-ratio limits)."
+        },
+        "entryModuleId": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Module id of the unit entry (from the splitter units.json entryId); must not change between base and patch builds."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

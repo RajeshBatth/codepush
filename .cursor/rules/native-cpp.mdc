@@ -1,0 +1,13 @@
+---
+description: Rules for the C++ core and the OTA runtime orchestrator (native/)
+globs: native/**/*.{cpp,h,hpp,cmake,txt}
+alwaysApply: false
+---
+- C++17. **No exceptions across the public API** (return Status/error structs). No platform headers in `native/otacore` (Android/iOS code lives outside and implements the injected interfaces).
+- The orchestrator (`native/otacore/runtime`) is single-threaded behind `Scheduler`; heavy work goes through the `Worker` interface. All time comes from the injected `Clock` so tests use virtual time.
+- Safety order before evaluating a unit/host: path under the cache root, size, sha256 vs manifest hash, 4-byte alignment, Hermes magic `0x1F1903C103BC1FC6` at offset 0, bytecode version at offset 8. Any failure marks the patch bad and falls back to embedded.
+- Crash counter counts **processes** (once per process per id); persist the attempt before evaluating; clear it on `markReady`.
+- Every behavior change needs a deterministic scenario test in `native/tests/runtime/` and must pass under ASan+UBSan (`-DOTACORE_SANITIZE=ON`).
+- Keep `bucket`/`select` identical to the TypeScript reference: they must pass `packages/ota-core/vectors/*.json` bit-for-bit.
+- Build with explicit compilers (`/usr/bin/clang`, `/usr/bin/clang++`); the `/usr/local/bin/clang*` symlinks are broken. Use `scripts/native-build.sh`. First build is slow (compiles the diff tools).
+- `native/third_party` is vendored; do not edit it (see `VERSIONS.md`).

@@ -1,0 +1,9 @@
+---
+description: Rules for writing documentation under docs/
+globs: docs/**
+alwaysApply: false
+---
+- Start each doc with **Purpose / Audience / Source of truth** (code paths or DESIGN.md sections it was derived from).
+- Every claim must be verifiable in code, tests or another doc. Mark unimplemented things **planned** and link the DESIGN.md section. When docs and code disagree, the code wins: fix the doc.
+- Use relative links and keep them valid (run the link check). Do not copy large blocks of DESIGN.md: summarize and link.
+- Keep terminology consistent with `docs/glossary.md`. Update `docs/reference/rules-catalog.md` when a rule changes.

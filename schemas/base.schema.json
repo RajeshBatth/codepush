@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ota.example/schemas/base.schema.json",
+  "title": "OTA base release info",
+  "description": "ota-base/<appVersion>/base.json: hashes of the bundles embedded in the binary, written by the base release job (`ota-build base-info`) and read by `ota-cli init`. DESIGN.md 7.1. TypeScript type `BaseInfo` in packages/ota-core/src/types.ts. NOT expressible: the unit key sets of `units` and `sizes.units` must be equal.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["appVersion", "releaseTag", "toolchainImage", "patchAlgoVer", "hbc", "host", "units", "sizes"],
+  "properties": {
+    "appVersion": { "type": "string", "minLength": 1, "description": "Binary release line, e.g. \"11.9.0\"." },
+    "releaseTag": { "type": "string", "minLength": 1, "description": "Git tag of the release, e.g. \"v11.9.0\"." },
+    "toolchainImage": { "type": "string", "minLength": 1, "description": "Pinned CI toolchain image (digest) used to build; \"local-unpinned\" for local runs." },
+    "patchAlgoVer": { "type": "string", "minLength": 1, "description": "Patch algorithm version, e.g. \"v1\"." },
+    "hbc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bytecodeVersion", "hermescSha256"],
+      "description": "Hermes compiler used for the embedded bundles; patches must be built with exactly this one.",
+      "properties": {
+        "bytecodeVersion": { "type": "integer", "minimum": 1, "description": "Hermes bytecode (HBC) version, e.g. 96 for RN 0.78." },
+        "hermescSha256": { "$ref": "#/$defs/hash", "description": "sha256 of the hermesc binary." }
+      }
+    },
+    "host": { "$ref": "#/$defs/perPlatformHash", "description": "Hash of the embedded host bundle per platform." },
+    "units": {
+      "type": "object",
+      "description": "Hash of each embedded unit bundle, keyed by unit name.",
+      "propertyNames": { "minLength": 1 },
+      "additionalProperties": { "$ref": "#/$defs/perPlatformHash" }
+    },
+    "sizes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "units"],
+      "description": "zstd-compressed size in bytes of each embedded bundle: the base for the size-ratio limits (what shipping the unit in full would cost).",
+      "properties": {
+        "host": { "$ref": "#/$defs/perPlatformSize", "description": "Host bundle zstd size per platform." },
+        "units": {
+          "type": "object",
+          "description": "Unit bundle zstd sizes keyed by unit name.",
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": { "$ref": "#/$defs/perPlatformSize" }
+        }
+      }
+    },
+    "retired": { "type": "boolean", "description": "Set by the base release job when the release line leaves the live window." }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "\"sha256:\" + 64 lowercase hex chars." },
+    "perPlatformHash": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["android", "ios"],
+      "properties": {
+        "android": { "$ref": "#/$defs/hash", "description": "Android value." },
+        "ios": { "$ref": "#/$defs/hash", "description": "iOS value." }
+      }
+    },
+    "perPlatformSize": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["android", "ios"],
+      "properties": {
+        "android": { "type": "integer", "minimum": 0, "description": "Android size in bytes." },
+        "ios": { "type": "integer", "minimum": 0, "description": "iOS size in bytes." }
+      }
+    }
+  }
+}

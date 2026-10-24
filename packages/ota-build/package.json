@@ -1,0 +1,16 @@
+{
+  "name": "@ota/build",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "Build side of the OTA pipeline (DESIGN.md 7.8 steps 1-3): bundle (Metro splitter + hermesc), patch (HDiffPatch + round trip with the shipped C++ apply), hand-off to ota-cli deploy.",
+  "engines": { "node": ">=24" },
+  "bin": { "ota-build": "./src/cli.ts" },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 --test-timeout=900000 \"test/*.test.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "24.0.0"
+  }
+}

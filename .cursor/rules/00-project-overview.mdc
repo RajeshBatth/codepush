@@ -1,0 +1,19 @@
+---
+description: Always-on summary of the OTA/CodePush repo, its invariants, and where to look
+alwaysApply: true
+---
+# OTA / CodePush for a hybrid bare RN 0.78 app
+
+Start with `AGENTS.md` (map, invariants, commands, "how to make common changes"). Human docs: `docs/README.md`. Full design + decisions: `DESIGN.md`.
+
+Core idea: one Metro graph is split into a **host** (in the binary) and per-LoB **units** (patchable OTA). Patches are HDiffPatch+zstd diffs of Hermes bytecode in a signed static manifest; rollout % is decided on the device; every state change is an immutable, audited version.
+
+Never violate (details in AGENTS.md):
+- Ownership by path/package; host = everything else. Only the host may import a unit, only via async `import()` of its declared entry.
+- Metro internals only in `packages/unit-splitter/src/metro-compat.js`.
+- Fail closed: verify signature (over the exact served bytes), hashes, Hermes magic/version before evaluating; fall back to the embedded bundle.
+- Deterministic builds (`hermesc -O -emit-binary -g0`, fixed relative name, pinned compiler). No absolute paths/timestamps in outputs.
+- `packages/ota-core` is pure (no IO). IO sits behind ports in `packages/ota-cli`.
+- Mark unimplemented things as "planned"; do not invent features.
+
+Before claiming something works, run the relevant suite: `bash scripts/test-all.sh --fast` (or the package's `npm test`).

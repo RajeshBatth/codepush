@@ -1,0 +1,10 @@
+---
+description: Context for the device spike app (spike-quality code, not product code)
+globs: examples/spike-app/**
+alwaysApply: false
+---
+- This app proves loader behavior on a real RN 0.78.3 app; **its native glue is a template, not a library**. Reusable code is `shared/` (C++ loader primitives) and the patterns in `android/SPIKE_ANDROID.md`, `ios/SPIKE_IOS.md`, `docs/research/rn-0.78-loader.md`.
+- `shared/` is host-tested and compile-checked against RN headers: change it only with its tests (`shared/test_loader_core.cpp`).
+- Run units through the host-provided `__otaRequire(id)`, never Metro's `__r` (it swallows entry exceptions via `ErrorUtils.reportFatalError`). Entry ids are 48-bit: pass as a double.
+- Android: build the ReactHost directly with a dynamic `JSBundleLoader` (DefaultReactHost caches statically); call `onHostResume` before the first surface; build without ccache on PATH. iOS: the factory's delegate `bundleURL` is re-read on every host reload; Xcode 26 needs the fmt consteval patch in the Podfile; simulator needs an installed runtime to run.
+- Generated assets (`.spike-assets/`, builds, Pods) are ignored; regenerate with `node scripts/prepare-spike-assets.mjs`.

@@ -1,0 +1,9 @@
+{
+  "checks": {
+    "publicPackages": ["@travelplex/core"],
+    "publicApiSnapshot": { "@travelplex/core": "api/travelplex-core.api.json" }
+  },
+  "units": [
+    { "name": "travelplex", "roots": ["@travelplex/ui"], "entry": "@travelplex/ui" }
+  ]
+}

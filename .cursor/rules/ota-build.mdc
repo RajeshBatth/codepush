@@ -1,0 +1,12 @@
+---
+description: Rules for the bundle/patch pipeline (packages/ota-build)
+globs: packages/ota-build/**
+alwaysApply: false
+---
+- hermesc recipe is fixed: `cd <workdir> && hermesc -O -emit-binary -g0 -out unit.hbc <fixed-relative-name>.js`. The compiler is **pinned by RN version + sha256** in `src/pins.ts` (osx/linux64/win64). Never run a non-pinned binary unless `--allow-unpinned` is explicit.
+- `patch` must **round-trip**: apply the produced diff with `ota_apply` (the same C++ code the app ships) and require the result's sha256 to equal the new bundle's. Never emit an unverified patch.
+- `full` updates are a diff against an **empty** old file (same apply code path).
+- Tool and work locations resolve: flag > env (`OTA_TOOLS_DIR`, `OTA_WORK_DIR`, `OTA_HERMESC`, `OTA_HDIFFZ`, `OTA_APPLY`) > repo-relative default. Do not hard-code repo-relative paths in new code.
+- Build outputs must be reproducible: no absolute paths, timestamps or random values. Run `verify-repro` after touching bundling.
+- Per-platform: a change in `Foo.android.js` can affect only Android; deploy args are per platform.
+- Tests skip with a clear message (not fail) only when external tools are missing; `fetch-tools` + the native tool build make them run.

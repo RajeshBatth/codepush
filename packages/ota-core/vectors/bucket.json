@@ -1,0 +1,122 @@
+[
+  {
+    "deviceId": "device-0001",
+    "unit": "cabs",
+    "bucket": 0.3986315419897437
+  },
+  {
+    "deviceId": "device-0001",
+    "unit": "bus",
+    "bucket": 0.7558318148367107
+  },
+  {
+    "deviceId": "device-0001",
+    "unit": "travelplex",
+    "bucket": 0.1324752983637154
+  },
+  {
+    "deviceId": "device-0001",
+    "unit": "host",
+    "bucket": 0.1991317591164261
+  },
+  {
+    "deviceId": "device-0002",
+    "unit": "cabs",
+    "bucket": 0.9837454764638096
+  },
+  {
+    "deviceId": "device-0002",
+    "unit": "bus",
+    "bucket": 0.880398909561336
+  },
+  {
+    "deviceId": "device-0002",
+    "unit": "travelplex",
+    "bucket": 0.22074263799004257
+  },
+  {
+    "deviceId": "device-0002",
+    "unit": "host",
+    "bucket": 0.1632682355120778
+  },
+  {
+    "deviceId": "A1B2-C3D4",
+    "unit": "cabs",
+    "bucket": 0.6907841879874468
+  },
+  {
+    "deviceId": "A1B2-C3D4",
+    "unit": "bus",
+    "bucket": 0.7157454520929605
+  },
+  {
+    "deviceId": "A1B2-C3D4",
+    "unit": "travelplex",
+    "bucket": 0.6992299808189273
+  },
+  {
+    "deviceId": "A1B2-C3D4",
+    "unit": "host",
+    "bucket": 0.4014392851386219
+  },
+  {
+    "deviceId": "ünïcode-🚀",
+    "unit": "cabs",
+    "bucket": 0.11006104294210672
+  },
+  {
+    "deviceId": "ünïcode-🚀",
+    "unit": "bus",
+    "bucket": 0.3431178145110607
+  },
+  {
+    "deviceId": "ünïcode-🚀",
+    "unit": "travelplex",
+    "bucket": 0.47913718200288713
+  },
+  {
+    "deviceId": "ünïcode-🚀",
+    "unit": "host",
+    "bucket": 0.08221672615036368
+  },
+  {
+    "deviceId": "",
+    "unit": "cabs",
+    "bucket": 0.13753003953024745
+  },
+  {
+    "deviceId": "",
+    "unit": "bus",
+    "bucket": 0.9582725646905601
+  },
+  {
+    "deviceId": "",
+    "unit": "travelplex",
+    "bucket": 0.7456234600394964
+  },
+  {
+    "deviceId": "",
+    "unit": "host",
+    "bucket": 0.3849143034312874
+  },
+  {
+    "deviceId": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "unit": "cabs",
+    "bucket": 0.576419040793553
+  },
+  {
+    "deviceId": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "unit": "bus",
+    "bucket": 0.7174973741639405
+  },
+  {
+    "deviceId": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "unit": "travelplex",
+    "bucket": 0.4169933944940567
+  },
+  {
+    "deviceId": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "unit": "host",
+    "bucket": 0.051365061197429895
+  }
+]

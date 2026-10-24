@@ -1,0 +1,5 @@
+{
+  "$schema": "../pin.schema.json",
+  "branch": "ota/cabs/11.9.0",
+  "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}

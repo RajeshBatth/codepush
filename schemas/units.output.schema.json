@@ -1,0 +1,287 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ota.example/schemas/units.output.schema.json",
+  "title": "unit-splitter output units.json",
+  "description": "OUTPUT of the unit-splitter: <out>/units.json next to host.js, units/<name>.js and ids.json (packages/unit-splitter/src/build.js). Describes which module ids belong to the host and to each unit. Copied unchanged into the ota-build build dir (build.json.unitsMap points at it) and used as the 'base' of later patch builds. NAME CLASH WARNING: not the input units.config.json (units.config.schema.json) and not the governance units.json of the ota-deployments repo (ota-units-governance.schema.json). Builds made before the cycles/checks/publicApi fields existed lack them and do not validate. NOT expressible: moduleIds of host and units are disjoint; paths values name existing units; entryId is in the unit's moduleIds.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "platform",
+    "idBits",
+    "host",
+    "paths",
+    "units",
+    "cycles",
+    "warnings",
+    "checks",
+    "publicApi"
+  ],
+  "properties": {
+    "format": {
+      "const": 1,
+      "description": "Output format version."
+    },
+    "platform": {
+      "enum": [
+        "android",
+        "ios"
+      ],
+      "description": "Metro platform the graph was built for."
+    },
+    "idBits": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 53,
+      "description": "Width in bits of the path-hash module ids (default 48; ids must stay below 2^53 to be exact JS numbers)."
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "moduleIds",
+        "packages",
+        "assets"
+      ],
+      "properties": {
+        "file": {
+          "const": "host.js",
+          "description": "Host bundle file name."
+        },
+        "moduleIds": {
+          "$ref": "#/$defs/moduleIds",
+          "description": "Ids of all host-owned modules, ascending."
+        },
+        "packages": {
+          "$ref": "#/$defs/packages",
+          "description": "npm packages (name -> version) present in the host bundle."
+        },
+        "assets": {
+          "$ref": "#/$defs/assets",
+          "description": "Image assets referenced by host modules (files must exist in the binary)."
+        }
+      },
+      "description": "The host bundle (host.js): Metro runtime + polyfills + host-owned modules."
+    },
+    "paths": {
+      "type": "object",
+      "description": "entryModuleId (as string) -> unit name: what the host's compiled import() passes to asyncRequire.",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "units": {
+      "type": "object",
+      "description": "Per-unit bundle description keyed by unit name.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "file",
+          "entryId",
+          "entryPath",
+          "moduleIds",
+          "packages",
+          "assets"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "pattern": "^units/.+\\.js$",
+            "description": "Unit bundle file, units/<name>.js."
+          },
+          "entryId": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Module id of the unit entry module."
+          },
+          "entryPath": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Project-relative path key of the unit entry module."
+          },
+          "moduleIds": {
+            "$ref": "#/$defs/moduleIds",
+            "description": "Ids of all modules owned by the unit, ascending."
+          },
+          "packages": {
+            "$ref": "#/$defs/packages",
+            "description": "npm packages seen in the unit (patch mode: new pure-JS packages bundled into it)."
+          },
+          "assets": {
+            "$ref": "#/$defs/assets",
+            "description": "Image assets referenced by the unit's modules."
+          }
+        }
+      }
+    },
+    "cycles": {
+      "type": "object",
+      "description": "Dependency cycles per owner (\"host\" = first-party host code, or a unit name): the base a later patch build is compared against (checks.cycles ratchet).",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "signature",
+            "modules"
+          ],
+          "properties": {
+            "signature": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$",
+              "description": "sha256 hex of the sorted module keys of the strongly connected component."
+            },
+            "modules": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Project-relative keys of the modules in the cycle."
+            },
+            "async": {
+              "const": true,
+              "description": "Present (true) when the cycle needs an import() edge: informational only."
+            }
+          }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Non-fatal findings, sorted.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rule",
+          "message"
+        ],
+        "properties": {
+          "rule": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Rule id, e.g. \"cycle-async\", \"host-export-unknown\", \"public-api-changed\"."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable finding."
+          }
+        }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "description": "Per-check summary keyed by rule id (e.g. \"cycles\", \"single-import-site\", \"dynamic-require\", \"host-exports\", \"public-api\", \"public-deep-import\"). Extra counters vary per check and are allowed.",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "severity",
+          "count"
+        ],
+        "properties": {
+          "severity": {
+            "enum": [
+              "error",
+              "warn",
+              "off"
+            ],
+            "description": "Effective severity of the check in this build."
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of findings."
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "publicApi": {
+      "type": "object",
+      "description": "Runtime export surface of each public (host-owned) package at this build (config checks.publicPackages); compared with the committed snapshot file.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version",
+          "package",
+          "entry",
+          "default",
+          "exports"
+        ],
+        "properties": {
+          "version": {
+            "type": "string",
+            "description": "Installed package version."
+          },
+          "package": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Package name."
+          },
+          "entry": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Package-relative entry file analyzed."
+          },
+          "default": {
+            "type": "boolean",
+            "description": "Whether the entry has a default export."
+          },
+          "exports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Sorted runtime export names."
+          },
+          "opaque": {
+            "type": "string",
+            "description": "Present when the entry could not be statically analyzed; the reason."
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "moduleIds": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "packages": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Project-relative asset path."
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Bare 64-hex sha256 of the asset file (no \"sha256:\" prefix, unlike OTA hashes)."
+          }
+        }
+      }
+    }
+  }
+}

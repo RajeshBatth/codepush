@@ -1,0 +1,29 @@
+{
+  "name": "unit-splitter",
+  "version": "0.0.1",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "Phase-0 spike: split one Metro graph into host + unit bundles with path-hash module ids",
+  "scripts": {
+    "build": "node src/cli.js build --project ../../examples/demo-app --out ../../examples/demo-app/dist",
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "determinism": "node src/determinism.js"
+  },
+  "dependencies": {
+    "@babel/core": "7.28.4",
+    "@babel/parser": "7.28.4",
+    "@react-native/babel-preset": "0.78.3",
+    "@react-native/metro-config": "0.78.3"
+  },
+  "peerDependencies": {
+    "metro": "0.81.x || 0.87.x",
+    "metro-config": "0.81.x || 0.87.x",
+    "metro-runtime": "0.81.x || 0.87.x"
+  },
+  "devDependencies": {
+    "metro": "0.81.5",
+    "metro-config": "0.81.5",
+    "metro-runtime": "0.81.5"
+  }
+}

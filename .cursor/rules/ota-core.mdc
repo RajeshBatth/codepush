@@ -1,0 +1,11 @@
+---
+description: Rules for packages/ota-core (pure logic, formats, signing, selection)
+globs: packages/ota-core/**
+alwaysApply: false
+---
+- **No IO** in `src/` (no fs, network, clock, randomness except explicit injected args). Everything is a pure function over data. IO belongs in `packages/ota-cli` behind ports.
+- The manifest is signed as **canonical JSON** (`canonicalize`) and verified over the **exact served bytes** (`verifyManifestBytes`). Never parse-then-reserialize before verifying.
+- `bucket()` and `selectUnit()` are mirrored in C++ (`native/otacore`). Any behavior change must regenerate `vectors/*.json` (`npm run vectors`) and keep `native` ctest green.
+- Changing a type in `src/types.ts` means updating: the matching `schemas/*.schema.json`, `schemas/fixtures` (`npm run schemas:fixtures` at the repo root), and `test/schemas.test.ts` drift checks.
+- Ranges are half-open `[start,end)` over a bucket in `[0,1)`; entries without `range` mean 100%. The ladder is newest-first; only the newest patch can be ramped; halting the newest returns its devices to the previous patch.
+- Audit records form a hash chain (`prevAuditHash`); never edit a record after writing it.

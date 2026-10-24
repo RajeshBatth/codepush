@@ -1,0 +1,9 @@
+---
+description: Rules for JSON Schemas and fixtures
+globs: schemas/**
+alwaysApply: false
+---
+- Schemas are draft 2020-12, closed (`additionalProperties:false`) where the format is closed, with `title` and `description` on every property.
+- Some invariants are NOT expressible in JSON Schema (range overlap, audit hash chain, pin branch vs path, disjoint roots). They stay in code; say so in the schema description.
+- After changing a schema or a type: `npm run schemas:fixtures` (repo root) then `npm run schemas:test`. Fixtures must stay small and deterministic.
+- Note the name clash: the splitter's output `units.json` (`units.output.schema.json`) differs from the governance repo's `units.json` (`ota-units-governance.schema.json`) and from `units.config.json`.

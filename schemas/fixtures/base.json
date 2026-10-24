@@ -1,0 +1,48 @@
+{
+  "appVersion": "11.9.0",
+  "releaseTag": "release/11.9.0",
+  "toolchainImage": "img@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "patchAlgoVer": "v1",
+  "hbc": {
+    "bytecodeVersion": 96,
+    "hermescSha256": "sha256:a82e519e1fa3737f6b95554cdb9edaaf37458fb03abcdc2144f039fa0b3302ab"
+  },
+  "host": {
+    "android": "sha256:c4ff882ba5a093546504872fb7966d3cb5587b4ba44b87c9977db865f2eed9ba",
+    "ios": "sha256:37e92205e8a05324a3284efc1ff3010bded8f6e1054dff3a64ca0181dd7ffc5d"
+  },
+  "units": {
+    "bus": {
+      "android": "sha256:9ce88ab0b25d81367b6ceca5fb45cd95fdc8d6a056d5f20d582eb1fbbd082f59",
+      "ios": "sha256:7b59088669ae7ec86e66ad8766454c8c41012987fb34b8175ea8dc94c2fa72d7"
+    },
+    "cabs": {
+      "android": "sha256:0ef871d161ec72843e00b0b3a681e2c27220483da22ff792d610e4c5f4d520fd",
+      "ios": "sha256:0ef871d161ec72843e00b0b3a681e2c27220483da22ff792d610e4c5f4d520fd"
+    },
+    "travelplex": {
+      "android": "sha256:96beefa72881b9ed3d0d2237ea0b14f6a7f97fc64a00339c721f415eff09bd3d",
+      "ios": "sha256:96beefa72881b9ed3d0d2237ea0b14f6a7f97fc64a00339c721f415eff09bd3d"
+    }
+  },
+  "sizes": {
+    "host": {
+      "android": 16046,
+      "ios": 16061
+    },
+    "units": {
+      "bus": {
+        "android": 857,
+        "ios": 857
+      },
+      "cabs": {
+        "android": 784,
+        "ios": 784
+      },
+      "travelplex": {
+        "android": 684,
+        "ios": 684
+      }
+    }
+  }
+}

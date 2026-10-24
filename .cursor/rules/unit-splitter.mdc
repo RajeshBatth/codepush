@@ -1,0 +1,12 @@
+---
+description: Rules for the Metro splitter and all static checks (packages/unit-splitter)
+globs: packages/unit-splitter/**
+alwaysApply: false
+---
+- **All Metro internals go through `src/metro-compat.js`** (version-gated 0.81.x / 0.87.x, loaded from the *project* first). Do not `import 'metro/src/...'` or `'metro/private/...'` anywhere else.
+- Adding a check: give it a stable **rule id**, a severity configurable under `checks` in `units.config.json` (parse it in `src/checks.js`), a message naming the offending module chain, and BOTH a negative and a positive test (copy `examples/demo-app` to a temp dir and inject the violation, like `test/checks.test.js`). Then update `docs/reference/rules-catalog.md` and `schemas/units.config.schema.json`.
+- The build must stay **deterministic**: module ids are 48-bit path hashes (project-relative keys), the Metro cache is disabled, output is sorted by id, no absolute paths in output.
+- Unit files contain only `__d(...)` registrations (no runtime, no side effects at evaluate time); the host holds Metro's runtime, polyfills and entry.
+- Ownership: roots may be directories or package names; they are realpath'd. Roots must be disjoint.
+- Cycle policy is a **ratchet**: base build errors on cycles unless baselined (`checks.cycleBaseline`); patch builds error only on cycles new vs the base build's recorded `cycles`.
+- Heavy: the full suite takes ~2 min alone. Run a single file with `node --test --test-concurrency=1 test/<file>.test.js`.

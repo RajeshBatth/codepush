@@ -1,0 +1,32 @@
+{
+  "appVersion": "11.9.0",
+  "mainBundle": {
+    "baseHash": "sha256:c4ff882ba5a093546504872fb7966d3cb5587b4ba44b87c9977db865f2eed9ba",
+    "entries": []
+  },
+  "patchAlgoVer": "v1",
+  "platform": "android",
+  "schema": 1,
+  "ttlSec": 120,
+  "units": [
+    {
+      "baseHash": "sha256:0ef871d161ec72843e00b0b3a681e2c27220483da22ff792d610e4c5f4d520fd",
+      "entries": [
+        {
+          "hash": "sha256:fd0eed1957cc32b2b56bae404039d071fc6e3bcf3d8897651ad7c289c80b7726",
+          "id": "cabs-pr42",
+          "patchUrl": "https://cdn.example.com/ota/android/11.9.0/cabs-pr42.ae745c96114d.android.patch",
+          "range": [
+            0,
+            0.1
+          ],
+          "requiresHost": null,
+          "size": 333,
+          "updateType": "patch"
+        }
+      ],
+      "unitName": "cabs"
+    }
+  ],
+  "version": 3
+}

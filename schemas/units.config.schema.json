@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ota.example/schemas/units.config.schema.json",
+  "title": "unit-splitter units.config.json",
+  "description": "INPUT of the unit-splitter (packages/unit-splitter, README 'Checks'): lives at the root of the app project as units.config.json and declares which source roots form which OTA unit plus the static `checks`. Read by `unit-splitter build` / `ota-build bundle` (config.js, checks.js parseChecks). NAME CLASH WARNING: not the splitter's output units.json (units.output.schema.json) and not the governance units.json of the ota-deployments repo (ota-units-governance.schema.json). NOT expressible: unit roots must be disjoint, entry must lie under one of the unit's roots and exist on disk, keys of checks.publicApiSnapshot must be listed in checks.publicPackages, unit names must be unique.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["units"],
+  "properties": {
+    "$schema": { "type": "string", "description": "Optional editor hint pointing at this schema; ignored by the splitter." },
+    "entry": { "type": "string", "minLength": 1, "description": "Project-relative path of the host entry file. Default: src/host/index.js." },
+    "metroConfig": { "type": ["string", "boolean", "null"], "description": "Project-relative path of the app's own metro.config.js that calls withOtaUnits(). Absent: auto-detect metro.config.js (or .cjs) in the project root. false or null: never use the app's config (the splitter assembles the Metro config itself, demo-app path). `true` is not meaningful (treated as auto-detect)." },
+    "units": {
+      "type": "array",
+      "description": "The OTA units. Everything not under a unit root belongs to the host.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "roots", "entry"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$", "not": { "const": "host" }, "description": "Unit name (lowercase, digits, hyphen); becomes units/<name>.js and the `import()` target name. \"host\" is reserved." },
+          "roots": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 },
+            "description": "Source roots owned by the unit: a project-relative DIRECTORY, or an npm PACKAGE NAME (e.g. \"@lob/cabs\", optionally written \"package:@lob/cabs\"). Roots of different units must be disjoint (not expressible)."
+          },
+          "entry": { "type": "string", "minLength": 1, "description": "Unit entry: project-relative file, \"<package>/<file>\", or a bare package name (its main file). Must be under one of the roots (not expressible)." }
+        }
+      }
+    },
+    "checks": { "$ref": "#/$defs/checks", "description": "Static checks beyond the direction rules. All keys optional; unknown keys are config errors in the splitter." }
+  },
+  "$defs": {
+    "severity": { "enum": ["error", "warn", "off"], "description": "error: fail the build; warn: report only; off: skip the check." },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cycles": { "$ref": "#/$defs/severity", "default": "error", "description": "Dependency cycles per owner (Tarjan SCC). Cycles through an import() edge are warnings only. Default: error." },
+        "cycleBaseline": { "type": ["string", "null"], "default": null, "description": "Ratchet: project-relative path of a baseline file {\"cycles\": {\"<owner>\": [{\"signature\",\"modules\"}]}} (generate with `cli.js cycle-baseline`). Default: null (none)." },
+        "singleImportSite": { "$ref": "#/$defs/severity", "default": "warn", "description": "Each unit entry may be import()ed from exactly one site. Default: warn." },
+        "dynamicRequire": { "$ref": "#/$defs/severity", "default": "error", "description": "Non-literal require()/import() and require.context() in first-party host code, unit code and packages bundled into a unit. Default: error." },
+        "requireRegisterComponent": { "type": "boolean", "default": false, "description": "Each unit entry must call AppRegistry.registerComponent('<unitName>', ...) with a literal name equal to the unit name. Default: false." },
+        "hostExports": { "$ref": "#/$defs/severity", "default": "error", "description": "Every static import a unit makes from a host module must exist in the host target's runtime exports. Default: error." },
+        "publicPackages": { "type": "array", "items": { "type": "string", "minLength": 1 }, "default": [], "description": "Host-owned packages units may use only through their entry/exports (deep imports are errors). Default: []." },
+        "publicApiSnapshot": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "minLength": 1 },
+          "default": {},
+          "description": "{ \"<package>\": \"<snapshot path relative to the project>\" }: committed public API snapshots compared at build. Keys must be listed in publicPackages (not expressible). Default: {}."
+        },
+        "publicApiStrict": { "type": "boolean", "default": false, "description": "Make an added public export an error instead of a warning. Default: false." }
+      }
+    }
+  }
+}

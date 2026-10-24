@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ota.example/schemas/audit.schema.json",
+  "title": "OTA audit record",
+  "description": "ota-state/<appVersion>/v<N>/audit.json: one tamper-evident audit record per immutable state version, written by ota-cli. DESIGN.md 7.1. TypeScript type `AuditRecord` in packages/ota-core/src/types.ts. NOT expressible: prevAuditHash must equal sha256(canonical JSON of the previous record) and previousVersion = stateVersion-1 chain integrity (checked by verifyAuditChain in ota-core); `approver` may be null only for halt, init and break-glass.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["stateVersion", "previousVersion", "prevAuditHash", "command", "unit", "patchId", "params", "requester", "approver", "ticket", "pr", "sourceSha", "jobUrl", "ts"],
+  "properties": {
+    "stateVersion": { "type": "integer", "minimum": 1, "description": "State version N this record belongs to (the folder v<N>)." },
+    "previousVersion": { "type": ["integer", "null"], "minimum": 1, "description": "The previous state version; null for the first record (init)." },
+    "prevAuditHash": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$", "description": "sha256 of the canonical JSON of the previous version's audit record; null for the first record. Tamper-evident hash chain." },
+    "command": { "enum": ["init", "deploy", "rollout", "halt", "restore"], "description": "The deploy-job command that produced this state version." },
+    "unit": { "type": ["string", "null"], "description": "Unit the command targeted (\"host\" for the host lane); null for init and whole-state restore." },
+    "patchId": { "type": ["string", "null"], "description": "Patch entry id `<unit>-pr<N>`; null for init and restore." },
+    "params": { "type": "object", "description": "Command-specific parameters, e.g. { \"percent\": 10, \"platforms\": [\"android\"] } or { \"releaseTag\": \"v11.9.0\" } for init. Free-form object." },
+    "requester": { "type": "string", "minLength": 1, "description": "Identity that requested the command." },
+    "approver": { "type": ["string", "null"], "description": "Identity that approved it; null only for halt (needs no approval), init and break-glass." },
+    "breakGlass": { "type": "boolean", "description": "True when the command used the break-glass path (flagged for review). Absent otherwise." },
+    "ticket": { "type": ["string", "null"], "description": "Jira ticket key, e.g. \"CAB-1\"; null when not applicable." },
+    "pr": { "type": ["integer", "null"], "minimum": 0, "description": "ota-deployments PR number; null when not applicable." },
+    "sourceSha": { "type": ["string", "null"], "description": "Source commit the patch was built from; null when not applicable." },
+    "jobUrl": { "type": ["string", "null"], "description": "URL of the CI job that ran the command; null when unknown." },
+    "ts": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$", "description": "UTC timestamp, ISO 8601 (Date.toISOString())." }
+  }
+}

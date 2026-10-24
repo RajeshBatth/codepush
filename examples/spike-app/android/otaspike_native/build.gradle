@@ -1,0 +1,42 @@
+// Native-only library module: libotaspike.so (JNI glue over shared/ota_unit_loader + shared/ota_unit_jsi.h).
+// A separate module so we do not touch RN's default app CMake (libappmodules.so).
+apply plugin: "com.android.library"
+
+android {
+    namespace "com.otaspike.nativelib"
+    ndkVersion rootProject.ext.ndkVersion
+    buildToolsVersion rootProject.ext.buildToolsVersion
+    compileSdk rootProject.ext.compileSdkVersion
+
+    defaultConfig {
+        minSdkVersion rootProject.ext.minSdkVersion
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_shared", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+                cppFlags "-std=c++20 -fexceptions -frtti"
+            }
+        }
+        ndk {
+            abiFilters(*reactNativeArchitectures())
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+    buildFeatures {
+        prefab true
+    }
+}
+
+def reactNativeArchitectures() {
+    def value = project.getProperties().get("reactNativeArchitectures")
+    return value ? value.split(",") : ["armeabi-v7a", "x86", "x86_64", "arm64-v8a"]
+}
+
+dependencies {
+    // version pinned by the React Native Gradle plugin; gives us prefab ReactAndroid::{reactnative,jsi} + fbjni
+    implementation("com.facebook.react:react-android")
+}

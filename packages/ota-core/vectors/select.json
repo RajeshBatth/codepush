@@ -1,0 +1,582 @@
+{
+  "manifest": {
+    "schema": 1,
+    "platform": "android",
+    "appVersion": "11.9.0",
+    "patchAlgoVer": "v1",
+    "version": 7,
+    "ttlSec": 120,
+    "mainBundle": {
+      "baseHash": "sha256:4740ae6347b0172c01254ff55bae5aff5199f4446e7f6d643d40185b3f475145",
+      "entries": [
+        {
+          "id": "host-pr88",
+          "patchUrl": "u",
+          "hash": "sha256:621f6276fcc7f974d18470fa625773f75d1a34dec838b19b8225c41b83a95167",
+          "size": 10,
+          "updateType": "patch",
+          "range": [
+            0,
+            0.5
+          ]
+        }
+      ]
+    },
+    "units": [
+      {
+        "unitName": "cabs",
+        "baseHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "entries": [
+          {
+            "id": "cabs-pr12",
+            "patchUrl": "u",
+            "hash": "sha256:ebbfb53547b778a125159d0de39c0be05b019fa447e6d358bf1aae65926aa553",
+            "size": 10,
+            "updateType": "patch",
+            "range": [
+              0,
+              0.2
+            ]
+          },
+          {
+            "id": "cabs-pr9",
+            "patchUrl": "u",
+            "hash": "sha256:95144b44f2a5ff5aa796af152bc61f599db54b2d1b7ecbc5c593ed4aeb47ba13",
+            "size": 10,
+            "updateType": "patch",
+            "range": [
+              0.2,
+              0.5
+            ]
+          },
+          {
+            "id": "cabs-pr13",
+            "patchUrl": "u",
+            "hash": "sha256:74dda5282c81de22f5c8cc9e637b115f3666eaf03e57ae606ed60bcf5e5e3e1c",
+            "size": 10,
+            "updateType": "patch",
+            "range": [
+              0.5,
+              0.6
+            ],
+            "requiresHost": "host-pr88"
+          }
+        ]
+      }
+    ]
+  },
+  "cases": [
+    {
+      "ctx": {
+        "bucket": 0,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "patch",
+        "entryId": "cabs-pr12",
+        "reason": "ok"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "host-pr88"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "patch",
+        "entryId": "cabs-pr12",
+        "reason": "ok"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0,
+        "embeddedHash": "sha256:d9298a10d1b0735837dc4bd85dac641b0f3cef27a47e5d53a54f2f3f5b2fcffa",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "base-mismatch"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v2"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "algo-unsupported"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.1,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "patch",
+        "entryId": "cabs-pr12",
+        "reason": "ok"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.1,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "host-pr88"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "patch",
+        "entryId": "cabs-pr12",
+        "reason": "ok"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.1,
+        "embeddedHash": "sha256:d9298a10d1b0735837dc4bd85dac641b0f3cef27a47e5d53a54f2f3f5b2fcffa",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "base-mismatch"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.1,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v2"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "algo-unsupported"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.2,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "patch",
+        "entryId": "cabs-pr9",
+        "reason": "ok"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.2,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "host-pr88"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "patch",
+        "entryId": "cabs-pr9",
+        "reason": "ok"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.2,
+        "embeddedHash": "sha256:d9298a10d1b0735837dc4bd85dac641b0f3cef27a47e5d53a54f2f3f5b2fcffa",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "base-mismatch"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.2,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v2"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "algo-unsupported"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.35,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "patch",
+        "entryId": "cabs-pr9",
+        "reason": "ok"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.35,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "host-pr88"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "patch",
+        "entryId": "cabs-pr9",
+        "reason": "ok"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.35,
+        "embeddedHash": "sha256:d9298a10d1b0735837dc4bd85dac641b0f3cef27a47e5d53a54f2f3f5b2fcffa",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "base-mismatch"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.35,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v2"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "algo-unsupported"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.5,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "requires-host-mismatch"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.5,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "host-pr88"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "patch",
+        "entryId": "cabs-pr13",
+        "reason": "ok"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.5,
+        "embeddedHash": "sha256:d9298a10d1b0735837dc4bd85dac641b0f3cef27a47e5d53a54f2f3f5b2fcffa",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "base-mismatch"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.5,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v2"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "algo-unsupported"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.55,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "requires-host-mismatch"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.55,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "host-pr88"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "patch",
+        "entryId": "cabs-pr13",
+        "reason": "ok"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.55,
+        "embeddedHash": "sha256:d9298a10d1b0735837dc4bd85dac641b0f3cef27a47e5d53a54f2f3f5b2fcffa",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "base-mismatch"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.55,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v2"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "algo-unsupported"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.6,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "no-range-match"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.6,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "host-pr88"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "no-range-match"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.6,
+        "embeddedHash": "sha256:d9298a10d1b0735837dc4bd85dac641b0f3cef27a47e5d53a54f2f3f5b2fcffa",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "base-mismatch"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.6,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v2"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "algo-unsupported"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.99,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "no-range-match"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.99,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "host-pr88"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "no-range-match"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.99,
+        "embeddedHash": "sha256:d9298a10d1b0735837dc4bd85dac641b0f3cef27a47e5d53a54f2f3f5b2fcffa",
+        "supportedAlgos": [
+          "v1"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "base-mismatch"
+      }
+    },
+    {
+      "ctx": {
+        "bucket": 0.99,
+        "embeddedHash": "sha256:1d9b529dad5a2ad52b9617975e34b18403acc2c4395f44eb00786a2763ae441e",
+        "supportedAlgos": [
+          "v2"
+        ],
+        "runningHostId": "embedded"
+      },
+      "unit": "cabs",
+      "expect": {
+        "source": "embedded",
+        "entryId": null,
+        "reason": "algo-unsupported"
+      }
+    }
+  ]
+}

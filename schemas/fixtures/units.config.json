@@ -1,0 +1,38 @@
+{
+  "$schema": "../units.config.schema.json",
+  "entry": "src/host/index.js",
+  "units": [
+    {
+      "name": "cabs",
+      "roots": [
+        "src/units/cabs"
+      ],
+      "entry": "src/units/cabs/entry.js"
+    },
+    {
+      "name": "bus",
+      "roots": [
+        "src/units/bus"
+      ],
+      "entry": "src/units/bus/entry.js"
+    },
+    {
+      "name": "travelplex",
+      "roots": [
+        "src/units/travelplex"
+      ],
+      "entry": "src/units/travelplex/entry.js"
+    }
+  ],
+  "checks": {
+    "cycles": "error",
+    "cycleBaseline": null,
+    "singleImportSite": "warn",
+    "dynamicRequire": "error",
+    "requireRegisterComponent": false,
+    "hostExports": "error",
+    "publicPackages": [],
+    "publicApiSnapshot": {},
+    "publicApiStrict": false
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@ota/cli",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "Deploy-job emulator: applies approved commands to the state in a (local) CI artifact store and deploys manifests to a (local) CDN.",
+  "bin": {
+    "ota": "./src/cli.ts"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.ts\""
+  },
+  "dependencies": {
+    "@ota/core": "file:../ota-core"
+  },
+  "devDependencies": {
+    "@types/node": "24.0.0"
+  }
+}

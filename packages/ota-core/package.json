@@ -1,0 +1,21 @@
+{
+  "name": "@ota/core",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "Shared OTA logic: manifest schema/validation, bucketing, selection, rollout ladder, signing, audit, authorization.",
+  "scripts": {
+    "test": "node --test \"test/*.test.ts\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "vectors": "node scripts/gen-vectors.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "devDependencies": {
+    "@types/node": "24.0.0",
+    "ajv": "8.17.1",
+    "typescript": "5.9.2"
+  }
+}

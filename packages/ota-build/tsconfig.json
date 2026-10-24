@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "ES2023", "module": "NodeNext", "moduleResolution": "NodeNext", "strict": true, "noEmit": true,
+    "allowImportingTsExtensions": true, "erasableSyntaxOnly": true, "verbatimModuleSyntax": true, "skipLibCheck": true,
+    "types": ["node"], "typeRoots": ["../ota-core/node_modules/@types"], "noUnusedLocals": true
+  },
+  "include": ["src", "test"]
+}

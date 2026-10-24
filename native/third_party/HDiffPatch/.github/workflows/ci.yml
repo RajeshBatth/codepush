@@ -1,0 +1,149 @@
+name: ci
+on: [push, pull_request]
+jobs:
+
+  gcc-build:
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: make_slef
+        run: |
+          make CC=gcc CXX=g++ ZLIB=0 BSD=0 BZIP2=0 LDEF=0 LZMA=0 ZSTD=0 MD5=0 XXH=0 -j
+          make clean
+      - name: make_0
+        run: |
+          make CC=gcc CXX=g++ DIR_DIFF=0 MT=0 VCD=0 ZLIB=0 BSD=0 BZIP2=0 LDEF=0 LZMA=0 ZSTD=0 MD5=0 XXH=0 -j
+          make clean
+      - name: make_all
+        run: |
+          git clone --depth=1 https://github.com/sisong/libmd5.git ../libmd5
+          git clone --depth=1 https://github.com/sisong/xxHash.git ../xxHash
+          git clone --depth=1 https://github.com/sisong/lzma.git ../lzma
+          git clone --depth=1 https://github.com/sisong/zstd.git ../zstd
+          git clone --depth=1 https://github.com/sisong/bzip2.git ../bzip2
+          git clone --depth=1 https://github.com/sisong/zlib.git ../zlib
+          git clone --depth=1 https://github.com/sisong/libdeflate.git ../libdeflate
+          make CC=gcc CXX=g++ -j
+          ./unit_test
+          make clean
+
+  clang-build:
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: make_slefByClang
+        run: |
+          make CL=1 ZLIB=0 BSD=0 BZIP2=0 LDEF=0 LZMA=0 ZSTD=0 MD5=0 XXH=0 -j
+          make clean
+      - name: make_allByClang
+        run: |
+          git clone --depth=1 https://github.com/sisong/libmd5.git ../libmd5
+          git clone --depth=1 https://github.com/sisong/xxHash.git ../xxHash
+          git clone --depth=1 https://github.com/sisong/lzma.git ../lzma
+          git clone --depth=1 https://github.com/sisong/zstd.git ../zstd
+          git clone --depth=1 https://github.com/sisong/bzip2.git ../bzip2
+          git clone --depth=1 https://github.com/sisong/zlib.git ../zlib
+          git clone --depth=1 https://github.com/sisong/libdeflate.git ../libdeflate
+          make CL=1 -j
+          ./unit_test
+          make CL=1 clean
+
+  xcode-build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: initAndClone
+        run: |
+          git clone --depth=1 https://github.com/sisong/libmd5.git ../libmd5
+          git clone --depth=1 https://github.com/sisong/xxHash.git ../xxHash
+          git clone --depth=1 https://github.com/sisong/lzma.git ../lzma
+          git clone --depth=1 https://github.com/sisong/zstd.git ../zstd
+          git clone --depth=1 https://github.com/sisong/zlib.git ../zlib
+          git clone --depth=1 https://github.com/sisong/libdeflate.git ../libdeflate
+      - name: buildByXcode
+        run: |
+          xcodebuild -workspace builds/xcode/HDiffPatch.xcworkspace -scheme hdiffz -configuration Release OBJROOT=$PWD/bin SYMROOT=$PWD/bin
+          xcodebuild -workspace builds/xcode/HDiffPatch.xcworkspace -scheme hpatchz -configuration Release OBJROOT=$PWD/bin SYMROOT=$PWD/bin
+          xcodebuild -workspace builds/xcode/HDiffPatch.xcworkspace -scheme unitTest -configuration Release OBJROOT=$PWD/bin SYMROOT=$PWD/bin
+
+  macos-ndk-build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: nttld/setup-ndk@v1.5.0
+        with:
+          ndk-version: r23c
+      - name: buildByAndroidNDK
+        run: |
+          git clone --depth=1 https://github.com/sisong/libmd5.git ../libmd5
+          git clone --depth=1 https://github.com/sisong/xxHash.git ../xxHash
+          git clone --depth=1 https://github.com/sisong/lzma.git ../lzma
+          git clone --depth=1 https://github.com/sisong/zstd.git ../zstd
+          cd ./builds/android_ndk_jni_mk
+          ndk-build NDK_PROJECT_PATH=. NDK_APPLICATION_MK=./Application.mk APP_PLATFORM=android-16 APP_ABI=all
+
+  windows-ndk-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: nttld/setup-ndk@v1.5.0
+        with:
+          ndk-version: r23c
+      - name: buildByAndroidNDK
+        run: |
+          git clone --depth=1 https://github.com/sisong/libmd5.git ../libmd5
+          git clone --depth=1 https://github.com/sisong/xxHash.git ../xxHash
+          git clone --depth=1 https://github.com/sisong/lzma.git ../lzma
+          git clone --depth=1 https://github.com/sisong/zstd.git ../zstd
+          git clone --depth=1 https://github.com/sisong/bzip2.git ../bzip2
+          cd ./builds/android_ndk_jni_mk
+          ndk-build NDK_PROJECT_PATH=. NDK_APPLICATION_MK=./Application.mk BSD=1 BZIP2=1 MT=0
+
+  ubuntu-ndk-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: nttld/setup-ndk@v1.5.0
+        with:
+          ndk-version: r23c
+      - name: buildByAndroidNDK
+        run: |
+          curl -O http://launchpadlibrarian.net/648013231/libtinfo5_6.4-2_amd64.deb
+          sudo dpkg -i libtinfo5_6.4-2_amd64.deb
+          curl -O http://launchpadlibrarian.net/648013227/libncurses5_6.4-2_amd64.deb
+          sudo dpkg -i libncurses5_6.4-2_amd64.deb
+          git clone --depth=1 https://github.com/sisong/libmd5.git ../libmd5
+          git clone --depth=1 https://github.com/sisong/xxHash.git ../xxHash
+          git clone --depth=1 https://github.com/sisong/lzma.git ../lzma
+          git clone --depth=1 https://github.com/sisong/zstd.git ../zstd
+          git clone --depth=1 https://github.com/sisong/bzip2.git ../bzip2
+          cd ./builds/android_ndk_jni_mk
+          ndk-build NDK_PROJECT_PATH=. NDK_APPLICATION_MK=./Application.mk BSD=1 BZIP2=1 VCD=1 DIR=1
+
+  vc-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: microsoft/setup-msbuild@v3
+        with:
+          msbuild-architecture: x64
+      - name: initAndClone
+        run: |
+          git clone --depth=1 https://github.com/sisong/libmd5.git ../libmd5
+          git clone --depth=1 https://github.com/sisong/xxHash.git ../xxHash
+          git clone --depth=1 https://github.com/sisong/lzma.git ../lzma
+          git clone --depth=1 https://github.com/sisong/zstd.git ../zstd
+          git clone --depth=1 https://github.com/sisong/bzip2.git ../bzip2
+          git clone --depth=1 https://github.com/sisong/zlib.git ../zlib
+          git clone --depth=1 https://github.com/sisong/libdeflate.git ../libdeflate
+      - name: buildByVC
+        run: |
+          msbuild builds/vc/HDiffPatch.sln -t:rebuild -v:q -property:Platform=x64 -property:Configuration=Release /p:PlatformToolset=v145
+          msbuild builds/vc/HDiffPatch.sln -t:rebuild -v:q -property:Platform=x86 -property:Configuration=Release /p:PlatformToolset=v145
+          msbuild builds/vc/HDiffPatch.sln -t:rebuild -v:q -property:Platform=ARM64 -property:Configuration=Release /p:PlatformToolset=v145
