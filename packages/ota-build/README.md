@@ -34,17 +34,28 @@ The splitter's Metro is no longer read from a repo path: it is the PROJECT's Met
 ```
 <build dir>/   (per platform)
   build.json           schema 1: platform, appVersion, sourceSha, toolchain{rn,metro,hermescSha256,hbcVersion,hermescFlags},
-                       host{file,hash,size,zstdSize}, units{<u>:{...,entryModuleId}}, ids{file,hash}, unitsMap{file,hash}
+                       host{file,hash,size,zstdSize}, units{<u>:{...,entryModuleId}}, ids{file,hash}, unitsMap{file,hash},
+                       delta{enabled, baseBuild: sha256 of the base build.json | null, files:{"host.hbc"|"units/<u>.hbc": {baseHbc?: sha256 of the base .hbc, js: sha256 of the JS compiled}}}
   host.hbc  units/<u>.hbc  ids.json  units.json
   js/                  the splitter's output (host.js, units/*.js, ids.json, units.json), kept for inspection
 <patch dir>/
-  patch-report.json    {schema, platform, appVersion, base, new, hostChanged, changedUnits, idsChanged,
-                        items:[{unit, patchFile, patchSize, updateType, builtHash, baseHash, ratioOfZstdFull, deltaPatchSize, newZstdSize}],
+  patch-report.json    {schema, platform, appVersion, base, new, deltaMode, hostChanged, changedUnits, idsChanged,
+                        items:[{unit, patchFile, patchSize, updateType, builtHash, baseHash, ratioOfZstdFull, deltaPatchSize, newZstdSize,
+                                plainEquivalentSize?, deltaOverPlain?   (only with patch --report-plain)}],
                         toolchain, algo{patchAlgoVer:v1, zstdLevel:19, minMatchScore:4, patchStepMemSize, fullThreshold:0.6}, tools{sha256 of hdiffz_tool, ota_apply}}
   <unit>.<platform>.<base12>-<new12>.(delta|full).hdiff
 ```
 `base`/`new` in the report are the sha256 of the two `build.json` files. `zstdSize` = zstd level 19 of the file (Node's built-in zstd). `build.json` contains no timestamps or paths.
 
+
+### Delta compile (`hermesc -base-bytecode`)
+Hermes bytecode diffs are dominated by string-table / ID renumbering (native/measure-rn078/STRING_TABLE.md): one string edit in the 860 KB RN host costs 17-48 KB as a plain patch (median about 33 KB). Compiling the NEW JS with `hermesc -O -emit-binary -g0 -base-bytecode=<embedded base>.hbc` (Hermes' own delta mode; present in the pinned 0.78.3 hermesc) seeds the string table with the base's, so existing IDs cannot move: the same edits cost 0.7-1.7 KB (median about 0.9 KB). Build-time only; the output is ordinary HBC v96, nothing changes on the device. Delta output is slightly larger than plain (+12 B on the host).
+- `bundle --base-build DIR [--delta auto|on|off]`: `auto` (default) = delta whenever a base build is given; `on` = same, but fails loudly (`DELTA_NO_BASE`, `DELTA_UNSUPPORTED`, `DELTA_BASE_MISSING`, `TOOLCHAIN_MISMATCH`), never falls back to plain; `off` = plain (exactly the previous recipe). A build without `--base-build` (the base release itself) is always plain.
+- Every file (host + each unit) is compiled with the fixed relative name `bundle.js` and the base copied to the fixed relative name `base.hbc` in the work dir, so the base's path cannot reach the output. A file whose JS sha256 equals the one recorded in the base's `build.json` is not recompiled: the base `.hbc` is copied (the one-unit rule compares built hashes, so an unchanged file must be byte-identical to the embedded one; measured to be true anyway on demo-app and two-package-app).
+- The delta base is ALWAYS the embedded base bundle: a base build whose `build.json` says `delta.enabled` is refused (`DELTA_BASE_IS_DELTA`); `patch` refuses a delta build against any base other than the one in `delta.baseBuild` (`DELTA_BASE_MISMATCH`). The base `.hbc` must be valid HBC of the toolchain's version (checked before hermesc runs; hermesc also rejects garbage with exit 5).
+- `build.json.delta` records `enabled`, `baseBuild` (sha256 of the base build.json) and per file `{baseHbc, js}`. `patch-report.json.deltaMode` says whether the new build was delta-compiled. `patch --report-plain` (off by default) additionally compiles each changed file plainly (needs `<new>/js` and the pinned hermesc), diffs it against the base and records `plainEquivalentSize` and `deltaOverPlain` (= deltaPatchSize / plainEquivalentSize) per item, so production can monitor the benefit.
+- `doctor` check `hermesc-delta`: parses `hermesc -help` for `-base-bytecode`; FAIL (with remedy) when patch builds need it (`--delta auto|on`) and it is missing, WARN with `--delta off`.
+- **Base artifact requirement.** Delta compile needs the base `.hbc` BYTES when a patch is built, but the artifact store (`ota-cli`) keeps only hashes in `base.json`. The base release job must therefore archive, next to `base.json`, the output of `ota-build archive-base --build <base build dir> --out <dir>` (per platform: `host.hbc`, `units/*.hbc`, `build.json` with the js hashes, `ids.json`, `units.json`, `archive-manifest.json` with every file's hash) and restore it as `--base-build` for patch builds. `archive-base --verify <dir> [--base-json base.json]` checks the manifest, the build.json and (with `--base-json`) that host/unit hashes and the hermesc identity equal what `ota-cli init` recorded. A planned extension of the `ota-cli` ports will store these files itself; until then it is the job's responsibility, and `bundle` fails with `DELTA_BASE_MISSING` (or use `--delta off`) when they are absent.
 
 ### Patch algorithm and reproducibility
 **Reproducibility recipe** (what `bundle` does for host.js and every unit)
@@ -65,10 +76,11 @@ For each file whose hash differs: diff -> round trip with `ota_apply` (= `otacor
 | command | what |
 |---|---|
 | `fetch-tools [--force] [--platform osx\|linux64\|win64]` | obtain/verify hermesc (default: the pin of this host), report hdiffz_tool and ota_apply paths + sha256. `--platform` fetches another OS's pin into `hermesc-rn0.78.3-<key>/` (hash-verified, never executed) |
-| `doctor --project DIR [--platform android\|ios] [--json] [--deep]` | readiness check, see below |
-| `bundle --project DIR --platform android\|ios --out DIR [--source-sha X] [--app-version V] [--base-build DIR]` | splitter -> hermesc -> `build.json`. `--base-build` turns on the splitter's patch-mode rules 3/4 against that earlier build |
-| `verify-repro --project DIR --platform P [--work DIR]` | bundle twice into different absolute paths; require byte-identical files and build.json |
-| `patch --base DIR --new DIR --out DIR [--overwrite] [--force-full]` | diffs + round trip + `patch-report.json` |
+| `doctor --project DIR [--platform android\|ios] [--json] [--deep] [--delta auto\|on\|off]` | readiness check, see below |
+| `bundle --project DIR --platform android\|ios --out DIR [--source-sha X] [--app-version V] [--base-build DIR] [--delta auto\|on\|off]` | splitter -> hermesc -> `build.json`. `--base-build` turns on the splitter's patch-mode rules 3/4 against that earlier build AND (`--delta` auto/on) hermesc delta mode against its `.hbc` files (see Delta compile) |
+| `verify-repro --project DIR --platform P [--work DIR] [--base-build DIR] [--delta M]` | bundle twice into different absolute paths; require byte-identical files and build.json (with `--base-build`: delta builds) |
+| `patch --base DIR --new DIR --out DIR [--overwrite] [--force-full] [--report-plain] [--hermesc PATH]` | diffs + round trip + `patch-report.json`; `--report-plain` adds the plain-compile equivalent size per item |
+| `archive-base --build DIR --out DIR` / `archive-base --verify DIR [--base-json FILE]` | copy exactly what a later delta build needs from the base release build, with a hash manifest / verify such an archive |
 | `base-info --android DIR --ios DIR [--release-tag T] [--toolchain-image I] [--app-version V] [--out FILE]` | BaseInfo JSON for `ota-cli init` |
 | `deploy-args --report F --report F --unit U --version V --pr N [--json] [--out FILE]` | the exact `ota-cli deploy` flags |
 
@@ -119,6 +131,7 @@ The linux64/win64 hashes were taken by hashing the files extracted from the `npm
 | `node-modules` | `node_modules` is a real directory | FAIL symlink (Metro's crawler/watcher does not follow it); WARN absent | real install / workspaces |
 | `hermes-engine` | android `gradle.properties` `hermesEnabled`, iOS `Podfile` `hermes_enabled` / `USE_HERMES` (unset = RN default true) | FAIL disabled; MANUAL if neither file exists | enable Hermes |
 | `hermesc` | pinned hermesc present and equal to the pin of THIS host (osx / linux64 / win64), its source (flag/env/default), and its sha256 compared with `node_modules/react-native/sdks/hermesc/<os-bin>/` of the PROJECT (both reported) | FAIL no pin for this OS/arch, pinned binary missing/wrong, or the project's hermesc differs; WARN project has none to compare | `fetch-tools`; add a pin for your OS/RN in `src/pins.ts` |
+| `hermesc-delta` | the hermesc in use lists `-base-bytecode` in `hermesc -help` | FAIL missing while delta is wanted (`--delta auto`/`on`); WARN with `--delta off` or when no hermesc could be resolved | `fetch-tools --force` (pinned hermesc), or `--delta off` |
 | `hdiffz`, `ota-apply` | native tools found; detail says flag/env/default | FAIL | build `native/build-ota-tools` or set `OTA_HDIFFZ` / `OTA_APPLY` |
 | `tools-dir` | the tools dir exists (or `OTA_HERMESC` set); path and origin reported | FAIL | `fetch-tools` |
 | `work-dir` | the work dir and its origin | always PASS | set `OTA_WORK_DIR` |
@@ -131,11 +144,12 @@ Verified on `examples/demo-app` (READY, 4 WARN for the missing RN/Metro/metro.co
 ## How to run the tests
 ```sh
 N=$(ls -d ~/.nvm/versions/node/v24*/bin); export PATH=$N:/opt/homebrew/bin:$PATH
-cd packages/ota-build && npm install && npm test        # 39 tests, about 25 s, sequential (--test-concurrency=1)
+cd packages/ota-build && npm install && npm test        # 57 tests, about 45 s, sequential (--test-concurrency=1)
 node ../ota-core/node_modules/typescript/bin/tsc --noEmit -p tsconfig.json
 ```
 Needs the built native tools (`native/build-ota-tools/{hdiffz_tool,ota_apply}`) and `.tools/hermesc-rn0.78.3` from `fetch-tools` (Setup above). Without them the pipeline and the "realistic RN layout" doctor tests print a SKIPPING reason instead of failing (the project-only doctor tests still run).
 - `test/pipeline.test.ts` (17): builds the demo app for both platforms, edits a COPY, patches, runs the real `ota-cli` (keygen/init/deploy/rollout 10/verify), simulates a device with `ota-core` (`bucket` + `selectUnit` on the served manifest) and applies the served patch with `ota_apply`, requiring `sha256 == manifest hash`. Also host change, two units changed, identical builds, tampered/truncated patch, garbage diff tool never emitted, `full` fallback, toolchain/platform/appVersion mismatch, modified build dir, reproducibility.
+- `test/delta.test.ts` (18): hermesc delta mode. Unchanged files delta-compiled against their own base are byte-identical (demo-app, two-package-app); base path does not leak; wrong-version / garbage / empty / missing / truncated base fails cleanly; host and cabs string edits: delta patch <= plain patch (sizes printed), `--report-plain` equals the real plain build, ota_apply round trip; one-unit rule with delta; `--delta off` equals the plain recipe; determinism and `verify-repro` with a base; delta base must not be a delta build; `--delta on` failure modes; `archive-base` create/verify/tamper; doctor `hermesc-delta`.
 - `test/pins.test.ts` (5): pure logic of the pin table, host selection by platform/arch, `--platform` parsing, flag > env > default resolution.
 - `test/doctor.test.ts` (17): copies the demo app (and a synthetic RN 0.78.3 layout with the real pinned hermesc and a wired metro.config.js) into `<repo>/.work/` and breaks it: missing / malformed units config, bad root, missing entry, overlapping roots, missing host entry, Metro 0.80 / 0.81.2, RN 0.79, different or absent project hermesc, unwired / throwing metro.config.js, Hermes disabled, dangling Pods symlink, symlinked node_modules, missing hermesc on the machine.
 Work files go to `<repo>/.work/` and are removed afterwards.
@@ -160,6 +174,7 @@ Work files go to `<repo>/.work/` and are removed afterwards.
 
 ## Known limitations / not done
 - The unit-splitter's `platform` handling: android and ios builds of the demo app are byte-identical today; platform is mostly a label in build.json.
+- Delta mode (hermesc `-base-bytecode`) was verified by round trip through `ota_apply`, determinism, and one program run under the Hermes 0.78.3 runtime (STRING_TABLE.md); it has NOT been run on a device with the full app. The base `.hbc` archive is the job's responsibility until the `ota-cli` ports store it.
 - Real-device loading of the `.hbc` files and large-app scale are not covered (demo app: 17 modules, units about 1 KB). Patch ratios on tiny units are dominated by fixed overhead.
 - linux64/win64 hermesc pins are hash-only (never executed by the engineer who recorded them); nothing here has run on Linux CI yet. `tar` is `/usr/bin/tar` if present else `tar` on PATH. The tarball's own integrity is whatever `npm pack` verifies; the binary hash pin is the trust anchor.
 - The native tools default to `<repo>/native/build-ota-tools` (override per tool; there is no single env var for the build dir). `ota-build` still imports the splitter and ota-core by relative path, so it must live in this repo layout (or be vendored whole).

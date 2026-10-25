@@ -100,7 +100,7 @@ Exit: a pilot unit patch reaches a real device through your CDN, is confirmed wi
 | R3 | Loader depends on RN internals (JSI `invokeAsync`, undeclared iOS selectors, `@FrameworkAPI`) | high on every RN upgrade | Keep an RN-upgrade checklist: re-run the spike scenarios, `metro-matrix.sh` |
 | R4 | LoB code fails Tier 2 (cycles, cross-LoB imports) | high / slows onboarding | Cycle baseline ratchet; undeclared LoBs stay in host |
 | R5 | Host string edits make large patches (22-35 KB on the spike host) | medium | Size limits sized for host; keep host lane for later |
-| R6 | Assets and native modules are not checked (no rule) | medium / broken screens | Manual review until the asset rule and native scan exist ([ADR-0012](../architecture/decisions/README.md)) |
+| R6 | Asset and native-module checks are conservative v1 rules: assets must already be in the binary; native modules must already be referenced by the base JS (indirect uses are invisible) | low-medium / broken screens | Rules implemented (`asset-not-in-base`, `asset-path-changed`, `native-module-new`); keep reviewing PRs that touch native bridge usage; a native-side inventory (`contractHash`) is planned ([ADR-0012](../architecture/decisions/README.md)) |
 | R7 | Artifact store lacks create-if-absent or retention exemption | medium / state loss | Conformance suite; DESIGN open question 9 |
 | R8 | Halt does not fix VMs that already loaded the patch | certain / user-visible | crash-loop guard, small first ramp, expectations in [incident-runbook](incident-runbook.md) |
 | R9 | `ota-cli` trusts `--requester/--approver` flags | certain in emulator | the real job must call GitHub/Jira APIs |
@@ -116,7 +116,7 @@ Exit: a pilot unit patch reaches a real device through your CDN, is confirmed wi
 | Real Jenkins jobs (verify, deploy, reconcile, base release) | not started | [04-release-workflow](../architecture/04-release-workflow.md) |
 | Jira integration (tickets, approval, `enforceJira` is off by default) | not started | `verify.ts` |
 | Rebuild-and-compare at deploy; stale-pin refusal; toolchain-image build in verify | not in code | [06](../architecture/06-safety-and-failure-modes.md) |
-| Asset rule | planned | [ADR-0012](../architecture/decisions/README.md) |
+| Asset rule | implemented (patch mode) | [ADR-0012](../architecture/decisions/README.md) |
 | `NativeModules`/TurboModule scan, `baseHash` rule in splitter, Tier 3 size budget and `global` lint, Tier 2 rule 9 cross-check of config vs governance | planned | [rules-catalog A4](../reference/rules-catalog.md) |
 | iOS device/simulator run | compiled only | [spikes/summary.md](../spikes/summary.md) |
 | Eager units / `preloadUnit` | planned, deliberately not v1 | DESIGN 4.1 |

@@ -133,7 +133,7 @@ patch size against the raw and zstd-19/gzip-9 compressed full new file. RSS delt
 <!-- runtime-orchestrator:begin -->
 `otacore/runtime/` (library `otaruntime`, docs in `otacore/runtime/README.md`) is the platform-neutral loader state
 machine of `DESIGN.md` 5.8: manifest accept/refresh, prefetch (download, build, verify), VM prewarm and host
-recreate, per-unit pinning, the unit budget, pre-evaluate checks and the crash-loop guard. It is single-threaded
+recreate, per-unit policy (`Config::defaultPolicy`/`unitPolicy`: pin per VM by default or per process, load budget, eager/lazy fetch), pre-evaluate checks and the crash-loop guard. It is single-threaded
 ("ota queue"), has no platform headers, and talks to the platform only through injected interfaces
 (`Clock, Scheduler, Worker, Http, FileSystem, Store, SignatureVerifier, EmbeddedAssets, PatchBuilder, VmController`).
 

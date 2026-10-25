@@ -4,6 +4,8 @@ import path from 'node:path';
 import { ownerOf } from './config.js';
 import { pathKey } from './ids.js';
 import { checkHostApi } from './public-api.js';
+import { collectAssets, compareAssets } from './assets.js';
+import { scanGraph } from './native-refs.js';
 import {
   DEFAULT_CHECKS, loadCycleBaseline, findCycles, tarjan, findRequireContext, findDynamicRequirePlaceholders, checkRegisterComponent,
 } from './checks.js';
@@ -267,9 +269,51 @@ export function analyze(graph, preModules, { projectRoot, units, base = null, ch
   // ---- C5: host API used by units (host-export-missing), public packages (deep imports, API snapshot) -----------------------
   const { publicApi } = checkHostApi({ mods, owner, units, projectRoot, checks, key, v, w, report, count });
 
+  // ---- C6: assets (Tier 1 asset rule): the bytes of an asset are in the binary, never in a patch ------------------------------
+  const platform = graph.transformOptions?.platform ?? null;
+  const assets = collectAssets(mods, (p) => owner.get(p), key, platform);
+  const ac = count('assets', checks.assets, { total: [...assets.values()].reduce((n, l) => n + l.length, 0) });
+  if (base && checks.assets !== 'off') {
+    const baseAssets = [...(base.host.assets ?? []), ...Object.values(base.units ?? {}).flatMap((u) => u.assets ?? [])];
+    const unitAssets = new Map([...assets].filter(([o]) => o !== 'host'));
+    for (const f of compareAssets(unitAssets, baseAssets)) { ac.count++; report(checks.assets, f.rule, f.message); }
+  }
+
+  // ---- C7: native modules (Tier 1 rule 5, v1): a patch may not reference a native module/view the base JS never referenced ------
+  const scan = scanGraph(mods, (p) => owner.get(p));
+  const nativeRefs = scan.inventory;
+  const nm = count('native-modules', checks.nativeModules, { modules: Object.keys(nativeRefs).length });
+  if (base && checks.nativeModules !== 'off') {
+    const baseRefs = base.nativeRefs;
+    if (!baseRefs) {
+      w('native-refs-base-missing', 'base build has no `nativeRefs` record in units.json (built before the native-module scan existed); native-module-new / native-method-new are not checked. Rebuild the base with this splitter version');
+    } else {
+      const sev = checks.nativeModules;
+      for (const [o, refs] of [...scan.byOwner].sort()) {
+        if (o === 'host') continue;
+        for (const [name, e] of [...refs].sort()) {
+          const files = [...e.files].map(key).sort().join(', ');
+          const b = Object.hasOwn(baseRefs, name) ? baseRefs[name] : null;
+          if (!b) {
+            nm.count++;
+            report(sev, 'native-module-new', `unit ${o} references native ${[...e.kinds].sort().join('/')} "${name}" (${files}) which the base build's JS never references; a patch cannot call a native module that the binary may not have. Ship the change with a binary release, or reference "${name}" from the base/train first (see README "Native-module scan")`);
+            continue;
+          }
+          const fresh = [...e.methods].filter((m) => !b.methods.includes(m)).sort();
+          if (fresh.length) w('native-method-new', `unit ${o} calls ${fresh.map((m) => `${name}.${m}`).join(', ')} (${files}) which the base build's JS never accessed on that native module; the method may not exist in the binary (static check only, indirect uses are invisible)`);
+        }
+      }
+      for (const d of scan.dynamic) {
+        if (d.owner === 'host') continue;
+        w('native-module-dynamic', `unit ${d.owner}: ${key(d.file)}${d.line ? `:${d.line}` : ''} looks up a native ${d.kind} with a non-literal name; it cannot be verified against the binary`);
+      }
+    }
+  }
+  for (const u of scan.unparsed) if (u.owner !== 'host') w('unparsed-source', `${key(u.file)}: cannot parse for the native-module scan`);
+
   // De-dup (a module can be reported via several keys).
   const uniqBy = (list) => [...new Map(list.map((x) => [x.rule + x.message, x])).values()];
-  return { owner, violations: uniqBy(violations), warnings: uniqBy(warnings), newPackages, cycles, checks: summary, publicApi };
+  return { owner, violations: uniqBy(violations), warnings: uniqBy(warnings), newPackages, cycles, checks: summary, publicApi, assets, nativeRefs };
 }
 
 /** `lazyUnit('cabs', () => import('../units/cabs/entry'))`: the name must match the unit that owns the target. */

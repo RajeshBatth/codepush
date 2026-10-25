@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ota.example/schemas/build.schema.json",
   "title": "ota-build build.json",
-  "description": "<build dir>/build.json written by `ota-build bundle` (packages/ota-build/src/bundle.ts, interface BuildJson). Lists the Hermes bytecode files of a platform build with their hashes and the toolchain that made them. Consumed by `ota-build patch`, `base-info` and verifyBuildDir (which re-hashes every referenced file). Hashes here are \"sha256:\" + 64 hex. NOT expressible: referenced files exist and match their hash; host/unit toolchain versions agree.",
+  "description": "<build dir>/build.json written by `ota-build bundle` (packages/ota-build/src/bundle.ts, interface BuildJson). Lists the Hermes bytecode files of a platform build with their hashes and the toolchain that made them. Consumed by `ota-build patch`, `base-info` and verifyBuildDir (which re-hashes every referenced file). Hashes here are \"sha256:\" + 64 hex. The optional `delta` block records whether the .hbc files were compiled with `hermesc -base-bytecode` (patch builds) and the sha256 of every JS input. NOT expressible: delta.enabled iff delta.baseBuild is non-null; delta.files lists exactly host + units; baseHbc present on every file when enabled; referenced files exist and match their hash; host/unit toolchain versions agree.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -97,6 +97,51 @@
     "unitsMap": {
       "$ref": "#/$defs/ref",
       "description": "The splitter's output units.json (see units.output.schema.json), copied into the build dir."
+    },
+    "delta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "baseBuild",
+        "files"
+      ],
+      "description": "Hermes delta compile record (absent in builds made before delta mode). Base releases and `--delta off` builds have enabled false; files then carry only the js hashes.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "True if every file was compiled with `hermesc -base-bytecode=<embedded base .hbc>` (unchanged files are copied from the base)."
+        },
+        "baseBuild": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "sha256 of the base build's build.json (always the EMBEDDED base build, never a delta build); null when enabled is false."
+        },
+        "files": {
+          "type": "object",
+          "description": "Per-file record keyed by the build-relative .hbc path (\"host.hbc\", \"units/cabs.hbc\").",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "js"
+            ],
+            "properties": {
+              "baseHbc": {
+                "$ref": "#/$defs/hash",
+                "description": "sha256 of the base .hbc used as -base-bytecode for this file (only when enabled)."
+              },
+              "js": {
+                "$ref": "#/$defs/hash",
+                "description": "sha256 of the JS file (splitter output) this .hbc was compiled from; equal JS in base and new build means the base .hbc is copied unchanged."
+              }
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {

@@ -1,8 +1,8 @@
 // DESIGN.md 7.8 step 2: HDiffPatch single compressed diff (zstd) per changed file + mandatory round trip through otacore::applyPatch.
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { verifyBuildDir, type BuildFileEntry, type BuildJson } from './bundle.ts';
-import { resolveHdiffz, resolveOtaApply, type ToolInfo } from './tools.ts';
+import { compileHbc, verifyBuildDir, type BuildFileEntry, type BuildJson } from './bundle.ts';
+import { resolveHdiffz, resolveHermesc, resolveOtaApply, type ToolInfo } from './tools.ts';
 import { BuildError, hashFile, readJson, rmrf, run, sha256Of, stagingDirFor, toJson } from './util.ts';
 import type { Platform, UpdateType } from './types.ts';
 
@@ -29,6 +29,10 @@ export interface PatchItem {
   /** size of the delta patch even when `full` was chosen (for information) */
   deltaPatchSize: number;
   newZstdSize: number;
+  /** only with --report-plain: size of the delta patch the same JS would have cost compiled WITHOUT -base-bytecode */
+  plainEquivalentSize?: number;
+  /** only with --report-plain: deltaPatchSize / plainEquivalentSize (< 1 means the delta compile helped) */
+  deltaOverPlain?: number;
 }
 export interface PatchReport {
   schema: 1;
@@ -38,6 +42,8 @@ export interface PatchReport {
   new: string;
   baseSourceSha: string | null;
   newSourceSha: string | null;
+  /** true if the NEW build was compiled with hermesc -base-bytecode against the (embedded) base */
+  deltaMode: boolean;
   hostChanged: boolean;
   changedUnits: string[];
   idsChanged: boolean;
@@ -98,6 +104,10 @@ export interface PatchOptions {
   fullThreshold?: number;
   hdiffzPath?: string;
   otaApplyPath?: string;
+  /** monitoring: also compile each changed file plainly and record the plain patch size (needs <new>/js and hermesc) */
+  reportPlain?: boolean;
+  hermescPath?: string;
+  allowUnpinnedHermesc?: boolean;
 }
 
 export function createPatches(o: PatchOptions): PatchReport {
@@ -123,6 +133,20 @@ export function createPatches(o: PatchOptions): PatchReport {
   }
   for (const [u, e] of Object.entries(baseB.units)) {
     if (newB.units[u].entryModuleId !== e.entryModuleId) throw new BuildError('IDS_CONFLICT', `unit ${u}: entryModuleId changed (${e.entryModuleId} -> ${newB.units[u].entryModuleId})`);
+  }
+
+  // a delta build is only meaningful against the base it was compiled from
+  if (newB.delta?.enabled) {
+    const baseBuildHash = hashFile(join(baseDir, 'build.json'));
+    if (newB.delta.baseBuild !== baseBuildHash) {
+      throw new BuildError('DELTA_BASE_MISMATCH', `the new build was delta-compiled against base build.json ${newB.delta.baseBuild}, but --base is ${baseBuildHash}`);
+    }
+    if (baseB.delta?.enabled) throw new BuildError('DELTA_BASE_IS_DELTA', 'the base of a patch must be the embedded base build, not a delta build');
+  }
+  const deltaMode = !!newB.delta?.enabled;
+  const plainHermesc = o.reportPlain && deltaMode ? resolveHermesc({ path: o.hermescPath, allowUnpinned: o.allowUnpinnedHermesc }) : null;
+  if (plainHermesc && plainHermesc.sha256 !== newB.toolchain.hermescSha256) {
+    throw new BuildError('TOOLCHAIN_MISMATCH', `--report-plain: hermesc ${plainHermesc.sha256} is not the one that built ${newDir}`);
   }
 
   const hdiffz = resolveHdiffz(o.hdiffzPath);
@@ -152,6 +176,22 @@ export function createPatches(o: PatchOptions): PatchReport {
       const deltaTmp = join(scratch, `${stem}.delta`);
       diffTo(hdiffz, baseFile, newFile, deltaTmp);
       const deltaSize = statSync(deltaTmp).size;
+      let plainEquivalentSize: number | undefined;
+      if (o.reportPlain) {
+        if (!plainHermesc) plainEquivalentSize = deltaSize; // a plain build: the plain-equivalent is the patch itself
+        else {
+          const jsRel = unit === 'host' ? 'host.js' : readJson<{ units: Record<string, { file: string }> }>(join(newDir, 'units.json')).units[unit].file;
+          const jsFile = join(newDir, 'js', jsRel);
+          if (!existsSync(jsFile)) throw new BuildError('NO_JS', `--report-plain needs ${jsFile} (the splitter output kept in the new build dir)`);
+          if (hashFile(jsFile) !== newB.delta!.files[n.file].js) throw new BuildError('BAD_BUILD', `${jsFile} does not match the js hash recorded in build.json`);
+          const plainHbc = join(scratch, `${stem}.plain.hbc`);
+          compileHbc(plainHermesc, jsFile, join(scratch, 'plain-work'), plainHbc, `plain-${unit}`);
+          const plainDiff = join(scratch, `${stem}.plain.delta`);
+          diffTo(hdiffz, baseFile, plainHbc, plainDiff);
+          plainEquivalentSize = statSync(plainDiff).size;
+          rmrf(plainHbc); rmrf(plainDiff);
+        }
+      }
       let updateType: UpdateType = 'patch';
       let chosen = deltaTmp;
       let chosenSize = deltaSize;
@@ -171,6 +211,7 @@ export function createPatches(o: PatchOptions): PatchReport {
       items.push({
         unit, patchFile: patchName, patchSize: chosenSize, updateType, builtHash: n.hash, baseHash: b.hash,
         ratioOfZstdFull: Number((chosenSize / n.zstdSize).toFixed(4)), deltaPatchSize: deltaSize, newZstdSize: n.zstdSize,
+        ...(plainEquivalentSize !== undefined ? { plainEquivalentSize, deltaOverPlain: Number((deltaSize / Math.max(plainEquivalentSize, 1)).toFixed(4)) } : {}),
       });
     }
     rmrf(scratch);
@@ -183,6 +224,7 @@ export function createPatches(o: PatchOptions): PatchReport {
       new: sha256Of(readFileSync(join(newDir, 'build.json'))),
       baseSourceSha: baseB.sourceSha,
       newSourceSha: newB.sourceSha,
+      deltaMode,
       hostChanged: items.some((i) => i.unit === 'host'),
       changedUnits: items.filter((i) => i.unit !== 'host').map((i) => i.unit),
       idsChanged: baseB.ids.hash !== newB.ids.hash,

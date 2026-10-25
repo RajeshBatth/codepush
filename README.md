@@ -12,15 +12,15 @@ Reference implementation and design for patching **units** (per-LoB slices of an
 ## Status
 | Component | What | State |
 |---|---|---|
-| `packages/ota-core` | formats, validation, signing, selection, ladder, audit, authz | 155 tests + typecheck |
+| `packages/ota-core` | formats, validation, signing, selection, ladder, audit, authz | 166 tests + typecheck |
 | `packages/ota-cli` | deploy job over ports, local adapters, conformance suites | 76 tests |
-| `packages/unit-splitter` | Metro splitter + static checks (ownership, cycles, encapsulation, dynamic requires, host-export, public API snapshot) | 83 tests |
-| `packages/ota-build` | bundle, patch (round-trip verified), reproducibility, doctor | 39 tests |
-| `native/` | C++ core, HDiffPatch apply, loader orchestrator | 41 CTest (also under ASan/UBSan) |
+| `packages/unit-splitter` | Metro splitter + static checks (ownership, cycles, encapsulation, dynamic requires, host-export, public API snapshot, assets, native modules) | 103 tests |
+| `packages/ota-build` | bundle, patch (round-trip verified, Hermes delta mode `-base-bytecode`), reproducibility, doctor | 57 tests |
+| `native/` | C++ core, HDiffPatch apply, loader orchestrator | 72 CTest (also under ASan/UBSan) |
 | `schemas/` | JSON Schemas for every file format | validated against generated artifacts |
-| `examples/spike-app` | real RN 0.78.3 hybrid app, S1-S10 device tests | Android: all pass on an arm64 emulator (debug build); iOS: compiles, not run |
+| `examples/spike-app` | real RN 0.78.3 hybrid app, S1-S10 device tests | Android: S1-S18 pass on an arm64 emulator (debug build), incl. delta-built bytecode, the on-device patch apply and a 262 KB unit; iOS: compiles, not run |
 
-**Not done yet:** reusable Android library / iOS pod extracted from the spike glue, Jenkins job definitions, Jira wiring, real S3/CDN/KMS adapters, the asset rule, the native-module scan, an iOS device run, `preloadUnit`. See the "NOT DONE YET" list in the adoption guide.
+**Not done yet:** reusable Android library / iOS pod extracted from the spike glue, Jenkins job definitions, Jira wiring, real S3/CDN/KMS adapters, a native-side module inventory (`contractHash`), an iOS device run, `preloadUnit`. See the "NOT DONE YET" list in the adoption guide.
 
 ## Quick start
 Requires Node >= 22.12 (developed on 24); the native part also needs CMake and clang.

@@ -13,6 +13,8 @@ export const DEFAULT_CHECKS = Object.freeze({
   dynamicRequire: 'error',
   requireRegisterComponent: false,
   hostExports: 'error',
+  assets: 'error',
+  nativeModules: 'error',
   publicPackages: Object.freeze([]),
   publicApiSnapshot: Object.freeze({}),
   publicApiStrict: false,
@@ -22,7 +24,7 @@ export const DEFAULT_CHECKS = Object.freeze({
 export function parseChecks(raw) {
   const c = { ...DEFAULT_CHECKS, ...(raw ?? {}) };
   for (const k of Object.keys(c)) if (!(k in DEFAULT_CHECKS)) throw new Error(`units.config.json checks: unknown key "${k}" (known: ${Object.keys(DEFAULT_CHECKS).join(', ')})`);
-  for (const k of ['cycles', 'singleImportSite', 'dynamicRequire', 'hostExports']) {
+  for (const k of ['cycles', 'singleImportSite', 'dynamicRequire', 'hostExports', 'assets', 'nativeModules']) {
     if (!SEV3.includes(c[k])) throw new Error(`units.config.json checks.${k} must be one of ${SEV3.join('|')}, got ${JSON.stringify(c[k])}`);
   }
   if (typeof c.requireRegisterComponent !== 'boolean') throw new Error('units.config.json checks.requireRegisterComponent must be a boolean');

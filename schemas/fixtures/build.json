@@ -2,7 +2,7 @@
   "schema": 1,
   "platform": "android",
   "appVersion": "11.9.0",
-  "sourceSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "sourceSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "toolchain": {
     "rn": "0.78.3",
     "metro": "0.81.5",
@@ -26,9 +26,9 @@
     },
     "cabs": {
       "file": "units/cabs.hbc",
-      "hash": "sha256:0ef871d161ec72843e00b0b3a681e2c27220483da22ff792d610e4c5f4d520fd",
-      "size": 1092,
-      "zstdSize": 784,
+      "hash": "sha256:4ed310958d1cf3c9387e954912166bade2742181d79ed00bd2375912a131b27e",
+      "size": 1220,
+      "zstdSize": 858,
       "entryModuleId": 11960423920495
     },
     "travelplex": {
@@ -45,6 +45,28 @@
   },
   "unitsMap": {
     "file": "units.json",
-    "hash": "sha256:52597894712037a54eaf35aaf1072172ad5655db35f0f130be985c329898fddf"
+    "hash": "sha256:bbbbb9db8fd08bb5f41dac339bff55433ab1e068d1890aa62e766aadd68684ce"
+  },
+  "delta": {
+    "enabled": true,
+    "baseBuild": "sha256:d62dd21db4efd633c2ceb42adffbad5f0c88ece50e65e9068c62f91ff1fa847d",
+    "files": {
+      "host.hbc": {
+        "baseHbc": "sha256:c4ff882ba5a093546504872fb7966d3cb5587b4ba44b87c9977db865f2eed9ba",
+        "js": "sha256:a59f733546fc82687cd08092e6d64850213f7abed7e6fd8c513237c1f9fc9c90"
+      },
+      "units/bus.hbc": {
+        "baseHbc": "sha256:9ce88ab0b25d81367b6ceca5fb45cd95fdc8d6a056d5f20d582eb1fbbd082f59",
+        "js": "sha256:56f846ccb005c6390005b51639b9267736eccdadadcf9263ad25c9328148fa6c"
+      },
+      "units/cabs.hbc": {
+        "baseHbc": "sha256:0ef871d161ec72843e00b0b3a681e2c27220483da22ff792d610e4c5f4d520fd",
+        "js": "sha256:8ca68cf9b7880113e3df1d7b46f448c4830c4ceb6eeb892a6e6657841c80f415"
+      },
+      "units/travelplex.hbc": {
+        "baseHbc": "sha256:96beefa72881b9ed3d0d2237ea0b14f6a7f97fc64a00339c721f415eff09bd3d",
+        "js": "sha256:44db634b390c05f0ec4337111309dea1f6bb63b3ff44357acb6f23260044bb85"
+      }
+    }
   }
 }

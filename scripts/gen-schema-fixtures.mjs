@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Regenerates schemas/fixtures/*.json by running the REAL pipeline once on examples/demo-app:
-//   ota-build bundle (android+ios) x2 -> patch -> base-info -> ota-cli init/deploy/rollout.
+//   ota-build bundle (android+ios) x2 (second one in hermesc delta mode) -> patch --report-plain -> base-info -> ota-cli init/deploy/rollout.
 // Work happens under <repo>/.work/schema-fixtures (deleted at the end unless --keep). Needs the external tools
 // (`scripts/fetch-tools.sh`, native/build-ota-tools). Run via: npm run schemas:fixtures   (or: node scripts/gen-schema-fixtures.mjs)
 // Determinism: fixed source shas, fixed clock for ota-cli. Not deterministic across machines: `tools.*` / hermesc hashes in
@@ -55,7 +55,7 @@ try {
     units: readJson(join(appBase, 'units.config.json')).units,
     checks: {
       cycles: 'error', cycleBaseline: null, singleImportSite: 'warn', dynamicRequire: 'error', requireRegisterComponent: false,
-      hostExports: 'error', publicPackages: [], publicApiSnapshot: {}, publicApiStrict: false,
+      hostExports: 'error', assets: 'error', nativeModules: 'error', publicPackages: [], publicApiSnapshot: {}, publicApiStrict: false,
     },
   };
   writeFileSync(join(appBase, 'units.config.json'), JSON.stringify(unitsConfig, null, 2));
@@ -68,7 +68,7 @@ try {
   for (const p of PLATFORMS) {
     node(BUILD_CLI, ['bundle', '--project', appBase, '--platform', p, '--out', join(W, `base-${p}`), '--app-version', APP_VERSION, '--source-sha', SHA_BASE]);
     node(BUILD_CLI, ['bundle', '--project', appNew, '--platform', p, '--out', join(W, `cabs-${p}`), '--app-version', APP_VERSION, '--source-sha', SHA_NEW, '--base-build', join(W, `base-${p}`)]);
-    node(BUILD_CLI, ['patch', '--base', join(W, `base-${p}`), '--new', join(W, `cabs-${p}`), '--out', join(W, `patch-${p}`)]);
+    node(BUILD_CLI, ['patch', '--base', join(W, `base-${p}`), '--new', join(W, `cabs-${p}`), '--out', join(W, `patch-${p}`), '--report-plain']);
   }
 
   // 3. state: base-info -> init -> deploy -> rollout 10%
@@ -107,7 +107,9 @@ try {
   console.log('collecting fixtures:');
   writeFixture('units.config.json', unitsConfig);
   writeFixture('units.output.json', readFileSync(join(W, 'base-android/units.json'), 'utf8'));
-  writeFixture('build.json', readFileSync(join(W, 'base-android/build.json'), 'utf8'));
+  // build.json = the PATCH build (hermesc delta mode, delta.enabled true); build.base.json = the base release build (delta.enabled false)
+  writeFixture('build.json', readFileSync(join(W, 'cabs-android/build.json'), 'utf8'));
+  writeFixture('build.base.json', readFileSync(join(W, 'base-android/build.json'), 'utf8'));
   writeFixture('patch-report.json', readFileSync(join(W, 'patch-android/patch-report.json'), 'utf8'));
   writeFixture('base.json', readFileSync(baseJson, 'utf8'));
   writeFixture('manifest.json', readFileSync(join(W, 'cdn/android', APP_VERSION, 'manifest.json'), 'utf8').replace(/^(.*)$/s, (s) => JSON.stringify(JSON.parse(s), null, 2)));

@@ -1,0 +1,5 @@
+strings 5763; kind runs (from the "String Kind Entry" table): identifier x255 from id 0, string x2548 from id 255, identifier x2960 from id 2804
+first 12 identifier ids: 0:$$typeof  1:type  2:API  3:isArray  4:Array  5:a  6:y  7:Boolean  8:Commands  9:Date  10:ERROR  11:elementType
+first 8 plain-string ids: 255:"^ {4}... skipping "  256:"$"  257:"t"  258:"offsetLeft"  259:"f"  260:"Deprecated API for"  261:"isArrayLike"  262:"keyboardDidShow"
+adjacent pairs in ascending alphabetical order: plain strings 62.1%, identifiers (ids >= 256) 65.0%  (50% = random, 100% = sorted)
+adjacent ids with increasing storage offset: 100.0% (the final id order follows packed-storage order, not first use)

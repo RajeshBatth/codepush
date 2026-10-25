@@ -2,7 +2,7 @@
 
 **Purpose:** How a device decides which host and unit bytes to run, loads them into the Hermes VM and protects itself; what is implemented in C++ and what is still platform glue.
 **Audience:** Native engineers (Android/iOS), SDK implementers, AI assistants editing `native/`.
-**Source of truth:** `native/otacore/runtime/{README.md,include/otaruntime/*,src/runtime.cpp}`, `native/otacore/include/otacore/`, `native/tests/runtime/*` (37 scenarios), `examples/spike-app/shared/*`, DESIGN.md sections 5.1-5.9 ([DESIGN.md](../../DESIGN.md)).
+**Source of truth:** `native/otacore/runtime/{README.md,include/otaruntime/*,src/runtime.cpp}`, `native/otacore/include/otacore/`, `native/tests/runtime/*` (53 scenarios), `examples/spike-app/shared/*`, DESIGN.md sections 5.1-5.9 ([DESIGN.md](../../DESIGN.md)).
 
 Related: [native-api reference](../reference/native-api.md), [platform integration guide](../guides/android-ios-integration.md), [spike results](../spikes/summary.md), [safety table](06-safety-and-failure-modes.md), [manifest and signing](03-manifest-state-and-signing.md), [glossary](../glossary.md).
 
@@ -11,7 +11,7 @@ Related: [native-api reference](../reference/native-api.md), [platform integrati
 | Piece | Status | Where |
 |---|---|---|
 | Portable core `otacore` (sha256, bucket, manifest parse/validate, `selectUnit`/`selectHost`, atomic hash-verified `applyPatch`, `Cache`) | implemented, 4 CTest suites | `native/otacore/src`, `native/tests` |
-| Orchestrator `otaruntime::Runtime` (state machine of DESIGN 5.8) | implemented, 37 scenario tests on a virtual clock | `native/otacore/runtime` |
+| Orchestrator `otaruntime::Runtime` (state machine of DESIGN 5.8) | implemented, 53 scenario tests on a virtual clock | `native/otacore/runtime` |
 | Loader primitives for one platform (mmap, pre-checks, JSI evaluate) | implemented as spike code | `examples/spike-app/shared/` |
 | Android/iOS glue that drives the spike | spike quality, **does not use `otaruntime::Runtime`** (it only uses `shared/` and `otacore/src/sha256.cpp`) | `examples/spike-app/android`, `examples/spike-app/ios` |
 | Production `Http`, `Store`, `VmController`, `Worker`, `Clock`, `Scheduler`, `EmbeddedAssets` implementations, Ed25519 verify, mmap `FileSystem::map`, entry-point table | **planned / not started** (listed under "Not in this library" in `native/otacore/runtime/README.md`) | n/a |
@@ -36,15 +36,17 @@ Native-driven loading (`openUnit`) is the primary path; `lazyUnit` is the fallba
 ### The ota queue
 All decisions run on one serial queue. Every `Runtime` method, `Clock` timer callback, `Scheduler` task, `Worker` `done` callback and `Runtime::on*` event must run on it. Only `Worker` `work` closures run elsewhere (hashing, `applyPatch`, file size, canonical path) and capture plain data. Interface calls never complete synchronously, and `openUnit/loadUnit` callbacks fire exactly once, via `Scheduler::post` (`interfaces.h` header comment, `runtime.h`).
 
-## 3. Resolution and the per-VM pin
+## 3. Resolution, unit policy and pin scope
 
 `Runtime::resolve` (runtime.cpp) implements DESIGN 5.2 for one unit:
 
 1. Use the in-memory manifest snapshot (a `shared_ptr`, swapped atomically); never wait for the network. No manifest or cache unavailable: embedded.
 2. `otacore::selectUnit(manifest, unit, ctx)` with `ctx.bucket = bucket(deviceId, unit)`, `embeddedHash`, `supportedAlgos`, `runningHostId`. Reasons: `ok`, `unit-not-in-manifest`, `base-mismatch`, `algo-unsupported`, `no-range-match`, `requires-host-mismatch`. Anything but a usable patch: `select-embedded` event, embedded unit.
-3. Patch artifact `Ready` (built and verified on disk): load it. In flight: wait up to `unitBudgetMs` (default 1000 ms, counted from resolution start, after the VM exists), then `budget-exceeded` and embedded; the download continues for next time.
+3. Patch artifact `Ready` (built and verified on disk): load it. In flight: wait up to the unit's `loadBudgetMs` (default `unitBudgetMs` = 1000 ms; `0` = never wait, counted from resolution start, after the VM exists), then `budget-exceeded` and embedded; the download continues for next time.
 4. The result is the unit's **pin** for this VM: `pinOf(unit)` is `""`, `"loading"`, `"embedded"`, `"patch:<id>"` or `"failed"`. Later manifest changes do not affect a pinned unit. Reason it is inherent: Metro's `define` ignores a second definition of an existing module id (spike S6 proved it).
 5. Manifest swaps mid-session only affect units not yet loaded, so unit A can be pinned from an older snapshot than unit B (consistency is per unit, not per session; DESIGN 5.5; test `mixed_snapshots_per_unit_pin`).
+6. **Unit policy** (`Config::defaultPolicy`, `Config::unitPolicy[unit]`, fields override individually): `pin` (`Vm` default | `Process`), `loadBudgetMs` (default `unitBudgetMs`; `0` = latency-first, load embedded at once if the patch is not already built, the patch is used by the next resolution; larger = freshness-first), `fetch` (`Eager` default | `Lazy`: no prefetch, the download starts at the first request and is bounded by `loadBudgetMs`). Presets: `UnitPolicy::latencyFirst()`, `freshnessFirst(ms)`, `stable()`.
+7. **pin = Vm (default)**: step 4 as written: fixed for the VM's life, a NEW VM re-resolves from the latest manifest (adopts a newer patch, drops a blacklisted or halted one), so a process can change a unit's version across VMs. **pin = Process (opt-in, for units with live state across VM recreation)**: the outcome of step 4 (patch id, or embedded, with its reason) is memoized for the process; a recreated VM loads the same entry, a manifest swap takes effect in the next process (prefetch still follows the latest manifest), two simultaneous requests share one decision, a failed resolution is not frozen. Safety exceptions, checked only when a NEW VM resolves the unit: the frozen patch is blacklisted (including the crash-limit), its entry is gone from the current manifest or changed hash or no longer covers this device / host, or the file is missing or fails the pre-evaluate checks. The freeze is then dropped and the normal selection runs. A freeze to embedded is kept. `frozenOf(unit)` reports it; events `selection-frozen`, `selection-reused`, `selection-dropped` carry `scope=vm|process` in the detail. A failed pin re-decides only in a clean VM (poisoned-VM rule, every policy). Tests: `native/tests/runtime/scn_policy.cpp`, `scn_freeze.cpp`.
 
 `requiresHost` entries are only used if `runningHostId` equals it (test `requires_host_skipped_until_vm_runs_host`). Prefetch resolves `requiresHost` against the host the runtime is heading to.
 
@@ -94,7 +96,7 @@ Order (README "Behaviour"): signature (`SignatureVerifier`) -> `parseManifest` -
 
 ## 9. Events
 
-`Observer::onEvent(Event{kind, unit, id, detail})` is the SDK's telemetry hook (DESIGN 8, 9: no built-in telemetry). Kinds emitted by `runtime.cpp`: `patch-bad`, `blacklisted`, `crash-suspected`, `cache-unavailable`, `manifest-accepted|rejected|same|not-modified|fetch-failed|persist-failed`, `download-start|done|failed|blocked-metered`, `build-start|ok|failed`, `verify-start|ok`, `gc`, `prewarm-settle-expired`, `vm-create|created|create-failed|destroyed|recreate`, `select-embedded`, `budget-exceeded`, `pre-evaluate-failed`, `attempt-persist-failed`, `evaluate-failed`, `entry-failed`, `unit-loaded`, `unit-failed`, `confirmed`. The DESIGN callbacks `onApplied/onConfirmed/onRolledBack` and `getActivePatch(unit)` are **planned** SDK-facing wrappers; today `Runtime::pinOf` and these events are the available data.
+`Observer::onEvent(Event{kind, unit, id, detail})` is the SDK's telemetry hook (DESIGN 8, 9: no built-in telemetry). Kinds emitted by `runtime.cpp`: `patch-bad`, `blacklisted`, `crash-suspected`, `cache-unavailable`, `manifest-accepted|rejected|same|not-modified|fetch-failed|persist-failed`, `download-start|done|failed|blocked-metered`, `build-start|ok|failed`, `verify-start|ok`, `gc`, `prewarm-settle-expired`, `vm-create|created|create-failed|destroyed|recreate`, `select-embedded`, `selection-frozen|reused|dropped`, `budget-exceeded`, `pre-evaluate-failed`, `attempt-persist-failed`, `evaluate-failed`, `entry-failed`, `unit-loaded`, `unit-failed`, `confirmed`. The DESIGN callbacks `onApplied/onConfirmed/onRolledBack` and `getActivePatch(unit)` are **planned** SDK-facing wrappers; today `Runtime::pinOf` and these events are the available data.
 
 ## 10. JS-side contract with the host bundle
 

@@ -31,3 +31,22 @@ test('real RN project: host + 3 units, asset and platform file owned by the unit
   assert.ok(a.checks.cycles.thirdPartyHostCycles >= 0);
   assert.deepEqual(a.warnings, []);
 });
+
+test('real RN project: asset + native-module checks give no false positives (unchanged patch); RN native references are inventoried', { skip: !have && 'examples/spike-app has no node_modules' }, async () => {
+  const b = tmp('spk-nb-');
+  const rb = await build({ projectRoot: SPIKE, outDir: b, platform: 'android' });
+  const refs = rb.unitsJson.nativeRefs;
+  assert.ok(Object.keys(refs).length > 30, `only ${Object.keys(refs).length} native references found in the RN graph`);
+  assert.ok(refs.UIManager || refs.AppState, 'well-known RN native modules are inventoried');
+  assert.ok(Object.values(refs).every((x) => x.owners.length && x.kinds.length));
+  const [icon] = rb.unitsJson.units.bus.assets;
+  assert.equal(icon.androidResource, 'src_units_bus_assets_busicon');
+  assert.equal(icon.iosPath, 'assets/src/units/bus/assets/bus-icon.png');
+  assert.deepEqual(icon.variants.map((v) => v.scale), [1]);
+  const rp = await build({ projectRoot: SPIKE, outDir: tmp('spk-np-'), platform: 'android', base: b });
+  assert.equal(rp.checks.assets.count, 0);
+  assert.equal(rp.checks['native-modules'].count, 0);
+  assert.deepEqual(rp.warnings, []);
+  assert.deepEqual(rp.unitsJson.nativeRefs, refs);
+  assert.deepEqual(rp.unitsJson.units.bus.assets, rb.unitsJson.units.bus.assets);
+});

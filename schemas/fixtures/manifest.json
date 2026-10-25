@@ -13,15 +13,15 @@
       "baseHash": "sha256:0ef871d161ec72843e00b0b3a681e2c27220483da22ff792d610e4c5f4d520fd",
       "entries": [
         {
-          "hash": "sha256:fd0eed1957cc32b2b56bae404039d071fc6e3bcf3d8897651ad7c289c80b7726",
+          "hash": "sha256:4ed310958d1cf3c9387e954912166bade2742181d79ed00bd2375912a131b27e",
           "id": "cabs-pr42",
-          "patchUrl": "https://cdn.example.com/ota/android/11.9.0/cabs-pr42.ae745c96114d.android.patch",
+          "patchUrl": "https://cdn.example.com/ota/android/11.9.0/cabs-pr42.2b8318bb6e1f.android.patch",
           "range": [
             0,
             0.1
           ],
           "requiresHost": null,
-          "size": 333,
+          "size": 251,
           "updateType": "patch"
         }
       ],

@@ -78,7 +78,14 @@ SCENARIO(inflight_patch_exceeds_budget_next_vm_uses_patch) {
   w.rt->onVmDestroyed();
   auto r2 = w.open("cabs");
   w.advance(500);
-  CHECK(r2->calls == 1 && r2->r.ok && r2->r.source == "patch" && r2->r.patchId == "cabs-pr1");
+  // Per-VM pin (freeze off): the next VM adopts the patch. Per-process freeze (default): the budget-expired
+  // EMBEDDED outcome is frozen for the process and kept by the recreated VM; the patch waits for the next process.
+  if (processPinned(w.cfg)) {
+    CHECK(r2->calls == 1 && r2->r.ok && r2->r.source == "embedded");
+    CHECK_EQ(w.rt->frozenOf("cabs"), std::string("embedded"));
+  } else {
+    CHECK(r2->calls == 1 && r2->r.ok && r2->r.source == "patch" && r2->r.patchId == "cabs-pr1");
+  }
 }
 
 // 7. Corrupt patch (manifest hash does not match the built result): marked bad, persisted, embedded used.
@@ -175,7 +182,10 @@ SCENARIO(evaluate_fails_for_embedded_reports_error_once) {
   auto r2 = w.open("cabs");
   w.advance(100);
   CHECK(r2->calls == 1 && !r2->r.ok);
-  CHECK_EQ(w.log.count("vm.evaluate"), 2);  // the failed pin is final for this VM: no loop
+  // Freeze off: the failed pin is final for this VM (no loop). Freeze on: a failure is never frozen, so the
+  // retry re-decides (patch is blacklisted now, so: one more embedded attempt, which fails again).
+  CHECK_EQ(w.log.count("vm.evaluate"), processPinned(w.cfg) ? 3 : 2);
+  CHECK(w.rt->frozenOf("cabs").empty());
   CHECK_EQ(w.log.count("vm.mount"), 0);
   auto r3 = w.open("bus");
   w.advance(100);
@@ -251,7 +261,11 @@ SCENARIO(requires_host_skipped_until_vm_runs_host) {
   CHECK_EQ(w.rt->runningHostId(), std::string("host-pr88"));
   auto r2 = w.open("cabs");
   w.advance(10);
-  CHECK(r2->r.ok && r2->r.source == "patch" && r2->r.patchId == "cabs-pr9");
+  if (processPinned(w.cfg)) {  // frozen to embedded (requires-host-mismatch) before the host swap
+    CHECK(r2->r.ok && r2->r.source == "embedded");
+  } else {
+    CHECK(r2->r.ok && r2->r.source == "patch" && r2->r.patchId == "cabs-pr9");
+  }
 }
 
 // 14. updateType "full": same applyPatch with an empty old source.
@@ -395,7 +409,8 @@ SCENARIO(io_error_during_build_falls_back_then_recovers) {
   w.rt->onVmDestroyed();
   auto r2 = w.open("cabs");
   w.advance(500);
-  CHECK(r2->r.ok && r2->r.source == "patch");
+  if (processPinned(w.cfg)) CHECK(r2->r.ok && r2->r.source == "embedded");  // embedded outcome frozen
+  else CHECK(r2->r.ok && r2->r.source == "patch");
 }
 
 // 19b. Persistent IO failure: bounded retries, then Failed until the next manifest swap; embedded throughout.

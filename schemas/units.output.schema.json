@@ -15,7 +15,8 @@
     "cycles",
     "warnings",
     "checks",
-    "publicApi"
+    "publicApi",
+    "nativeRefs"
   ],
   "properties": {
     "format": {
@@ -200,6 +201,20 @@
         "additionalProperties": true
       }
     },
+    "nativeRefs": {
+      "type": "object",
+      "description": "Native modules / native views referenced by the JS of this build (host, units, node_modules), found by a static AST scan (NativeModules.X, TurboModuleRegistry.get/getEnforcing('X'), requireNativeComponent/codegenNativeComponent('X'), UIManager.getViewManagerConfig('X'), destructuring and simple aliases). The base a later patch build is compared against (checks.nativeModules). Non-literal names are not recorded.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["owners", "methods", "kinds"],
+        "properties": {
+          "owners": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Sorted owners (\"host\" or unit names) whose modules reference it." },
+          "methods": { "type": "array", "items": { "type": "string" }, "description": "Sorted member names accessed directly on it (NativeModules.Foo.bar); indirect uses are invisible." },
+          "kinds": { "type": "array", "items": { "enum": ["module", "turbo", "view"] }, "description": "How it is referenced: NativeModules, TurboModuleRegistry, or view lookup." }
+        }
+      }
+    },
     "publicApi": {
       "type": "object",
       "description": "Runtime export surface of each public (host-owned) package at this build (config checks.publicPackages); compared with the committed snapshot file.",
@@ -279,6 +294,26 @@
             "type": "string",
             "pattern": "^[0-9a-f]{64}$",
             "description": "Bare 64-hex sha256 of the asset file (no \"sha256:\" prefix, unlike OTA hashes)."
+          },
+          "name": { "type": "string", "description": "Registered asset name (file name without scale suffix and extension)." },
+          "type": { "type": "string", "description": "File extension, e.g. png, ttf." },
+          "httpServerLocation": { "type": "string", "description": "Registered location (e.g. /assets/src/units/bus/assets): the Android drawable name and the iOS bundle path derive from it." },
+          "scales": { "type": "array", "items": { "type": "number" }, "description": "Registered scales (1, 2, 3 ...)." },
+          "androidResource": { "type": "string", "description": "Android resource name the RN bundling step derives (drawable/raw)." },
+          "iosPath": { "type": "string", "description": "Path of the 1x file inside the iOS app bundle." },
+          "variants": {
+            "type": "array",
+            "description": "Every scale file found next to the asset (each is a separate file in the binary).",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["scale", "path", "sha256"],
+              "properties": {
+                "scale": { "type": "number", "description": "Scale of this file (1, 2, 3 ...)." },
+                "path": { "type": "string", "description": "Project-relative path of the scale file." },
+                "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Bare 64-hex sha256 of the scale file." }
+              }
+            }
           }
         }
       }

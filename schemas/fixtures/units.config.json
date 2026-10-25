@@ -31,6 +31,8 @@
     "dynamicRequire": "error",
     "requireRegisterComponent": false,
     "hostExports": "error",
+    "assets": "error",
+    "nativeModules": "error",
     "publicPackages": [],
     "publicApiSnapshot": {},
     "publicApiStrict": false

@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { build as splitterBuild } from '../../unit-splitter/src/build.js';
 // @ts-ignore: plain-JS package
 import { describeMetro } from '../../unit-splitter/src/metro-compat.js';
-import { resolveHermesc, HERMES_FLAGS, RN_VERSION, type HermescInfo } from './tools.ts';
+import { resolveHermesc, hermescSupportsBaseBytecode, HERMES_FLAGS, RN_VERSION, type HermescInfo } from './tools.ts';
 import {
   BuildError, hashFile, isEmptyDir, listFiles, readJson, rmrf, run, sha256Of, stagingDirFor, toJson, zstdSize,
 } from './util.ts';
@@ -15,8 +15,26 @@ import { assertPlatform, validateHbc } from './hbc.ts';
 /** Name every file gets while hermesc reads it. With -g0 the name is not embedded anyway; fixed as defense in depth. */
 export const HERMES_INPUT_NAME = 'bundle.js';
 export const HERMES_ARGS = ['-O', '-emit-binary', '-g0'] as const;
+/** Fixed relative name the base bytecode gets while hermesc reads it (the base path never reaches hermesc). */
+export const HERMES_BASE_NAME = 'base.hbc';
+
+/** auto = delta whenever a base build is given; on = delta or fail loudly; off = always plain. */
+export type DeltaMode = 'auto' | 'on' | 'off';
+export const DELTA_MODES: readonly DeltaMode[] = ['auto', 'on', 'off'];
+export function parseDeltaMode(s: string | undefined): DeltaMode {
+  if (s === undefined) return 'auto';
+  if ((DELTA_MODES as readonly string[]).includes(s)) return s as DeltaMode;
+  throw new BuildError('USAGE', `--delta must be auto, on or off (got ${s})`);
+}
 
 export interface BuildFileEntry { file: string; hash: string; size: number; zstdSize: number }
+/** Hermes delta compile record. `files` is keyed like BuildJson file paths ("host.hbc", "units/<u>.hbc"). */
+export interface DeltaInfo {
+  enabled: boolean;
+  /** sha256 of the base build's build.json (null when not a delta build) */
+  baseBuild: string | null;
+  files: Record<string, { baseHbc?: string; js: string }>;
+}
 export interface BuildJson {
   schema: 1;
   platform: Platform;
@@ -27,6 +45,8 @@ export interface BuildJson {
   units: Record<string, BuildFileEntry & { entryModuleId: number }>;
   ids: { file: string; hash: string };
   unitsMap: { file: string; hash: string };
+  /** absent in builds made before delta mode existed */
+  delta?: DeltaInfo;
 }
 
 export interface BundleOptions {
@@ -37,6 +57,8 @@ export interface BundleOptions {
   appVersion?: string | null;
   /** an earlier build dir: enables the splitter's patch-mode rules 3/4 against its units.json/ids.json */
   baseBuild?: string | null;
+  /** see DeltaMode; default auto */
+  delta?: DeltaMode;
   hermescPath?: string;
   allowUnpinnedHermesc?: boolean;
 }
@@ -46,16 +68,56 @@ function metroVersion(project: string): string {
   return (describeMetro(project) as { version: string }).version;
 }
 
-/** Compile one JS file with the reproducible recipe: cwd = a work dir holding only `bundle.js`, relative names, -g0. */
-export function compileHbc(h: HermescInfo, jsFile: string, workRoot: string, outFile: string, label: string): void {
+/**
+ * Compile one JS file with the reproducible recipe: cwd = a work dir holding only `bundle.js` (and, in delta mode, a copy of the
+ * base bytecode named `base.hbc`), relative names, -g0. `baseHbc` (path) switches on `-base-bytecode=base.hbc`.
+ */
+export function compileHbc(h: HermescInfo, jsFile: string, workRoot: string, outFile: string, label: string, baseHbc?: string | null): void {
   const wd = join(workRoot, `hermes-${label}`);
   mkdirSync(wd, { recursive: true });
   copyFileSync(jsFile, join(wd, HERMES_INPUT_NAME));
-  const r = run(h.path, [...HERMES_ARGS, '-out', 'out.hbc', HERMES_INPUT_NAME], { cwd: wd, timeoutMs: 300_000 });
+  const args: string[] = [...HERMES_ARGS];
+  if (baseHbc) {
+    if (!existsSync(baseHbc)) throw new BuildError('DELTA_BASE_MISSING', `delta base bytecode for ${label} is missing: ${baseHbc}`);
+    validateHbc(readFileSync(baseHbc), h.hbcVersion, `delta base for ${label}`);
+    copyFileSync(baseHbc, join(wd, HERMES_BASE_NAME));
+    args.push(`-base-bytecode=${HERMES_BASE_NAME}`);
+  }
+  const r = run(h.path, [...args, '-out', 'out.hbc', HERMES_INPUT_NAME], { cwd: wd, timeoutMs: 300_000 });
   if (r.timedOut) throw new BuildError('HERMESC_TIMEOUT', `hermesc timed out on ${label}`);
-  if (r.status !== 0) throw new BuildError('HERMESC_FAILED', `hermesc failed (exit ${r.status}) on ${label}:\n${r.stderr || r.stdout}`);
+  if (r.status !== 0) throw new BuildError('HERMESC_FAILED', `hermesc failed (exit ${r.status}) on ${label}${baseHbc ? ' (delta mode)' : ''}:\n${r.stderr || r.stdout}`);
   renameSync(join(wd, 'out.hbc'), outFile);
   rmrf(wd);
+}
+
+/** The delta-mode decision for one bundle() call: null = plain. Throws on every `on` problem and on an unusable base build. */
+export function planDelta(o: { baseBuild?: string | null; delta?: DeltaMode; platform: Platform }, h: HermescInfo):
+  { baseDir: string; baseB: BuildJson; baseBuildHash: string } | null {
+  const mode = o.delta ?? 'auto';
+  if (mode === 'off') return null;
+  if (!o.baseBuild) {
+    if (mode === 'on') throw new BuildError('DELTA_NO_BASE', '--delta on needs --base-build <embedded base build dir>');
+    return null; // the base release itself is always plain
+  }
+  const baseDir = resolve(o.baseBuild);
+  if (!hermescSupportsBaseBytecode(h.path)) {
+    throw new BuildError('DELTA_UNSUPPORTED', `hermesc at ${h.path} does not support -base-bytecode (see \`hermesc -help\`); use the pinned RN ${RN_VERSION} hermesc (fetch-tools) or pass --delta off`);
+  }
+  const pre = loadBuild(baseDir);
+  for (const f of [pre.host.file, ...Object.values(pre.units).map((u) => u.file)]) {
+    if (!existsSync(join(baseDir, f))) {
+      throw new BuildError('DELTA_BASE_MISSING', `${join(baseDir, f)} is missing: delta compile needs the base .hbc BYTES (host.hbc, units/*.hbc, build.json, ids.json, units.json), not just hashes. Restore the archived base release files (ota-build archive-base) or pass --delta off`);
+    }
+  }
+  const baseB = verifyBuildDir(baseDir);
+  if (baseB.delta?.enabled) {
+    throw new BuildError('DELTA_BASE_IS_DELTA', `${baseDir} is itself a delta build; the delta base must always be the EMBEDDED base bundle, never a previous patch build`);
+  }
+  if (baseB.platform !== o.platform) throw new BuildError('PLATFORM_MISMATCH', `base build is ${baseB.platform}, bundling ${o.platform}`);
+  if (baseB.toolchain.hermescSha256 !== h.sha256 || baseB.toolchain.hbcVersion !== h.hbcVersion) {
+    throw new BuildError('TOOLCHAIN_MISMATCH', `base build was made with hermesc ${baseB.toolchain.hermescSha256} (HBC v${baseB.toolchain.hbcVersion}), this is ${h.sha256} (HBC v${h.hbcVersion}); a delta base must come from the same hermesc`);
+  }
+  return { baseDir, baseB, baseBuildHash: hashFile(join(baseDir, 'build.json')) };
 }
 
 function entryOf(file: string, rel: string, hbcVersion: number): BuildFileEntry {
@@ -76,9 +138,11 @@ export async function bundle(o: BundleOptions): Promise<{ outDir: string; build:
   const h = resolveHermesc({ path: o.hermescPath, allowUnpinned: o.allowUnpinnedHermesc });
   const stage = stagingDirFor(out);
   try {
+    // 0. delta decision first: every `on` problem / unusable base fails before the slow steps
+    const baseDir = o.baseBuild ? resolve(o.baseBuild) : null;
+    const delta = planDelta({ baseBuild: baseDir, delta: o.delta, platform: o.platform }, h);
     // 1. Metro splitter into <stage>/js
     const js = join(stage, 'js');
-    const baseDir = o.baseBuild ? resolve(o.baseBuild) : null;
     await splitterBuild({ projectRoot: project, outDir: js, base: baseDir, platform: o.platform });
     const unitsJson = readJson<{ units: Record<string, { file: string; entryId: number }> }>(join(js, 'units.json'));
     const unitNames = Object.keys(unitsJson.units).sort();
@@ -86,8 +150,24 @@ export async function bundle(o: BundleOptions): Promise<{ outDir: string; build:
     // 2. hermesc each file; hbc and metadata go to the top of the build dir
     const work = join(stage, '.hermes-work');
     mkdirSync(join(stage, 'units'), { recursive: true });
-    compileHbc(h, join(js, 'host.js'), work, join(stage, 'host.hbc'), 'host');
-    for (const u of unitNames) compileHbc(h, join(js, unitsJson.units[u].file), work, join(stage, 'units', `${u}.hbc`), `unit-${u}`);
+    const deltaFiles: DeltaInfo['files'] = {};
+    const compileOne = (rel: string, jsFile: string, outFile: string, label: string): void => {
+      const jsHash = hashFile(jsFile);
+      if (!delta) { compileHbc(h, jsFile, work, outFile, label); deltaFiles[rel] = { js: jsHash }; return; }
+      const be = rel === 'host.hbc' ? delta.baseB.host : delta.baseB.units[label.replace(/^unit-/, '')];
+      if (!be) throw new BuildError('DELTA_BASE_MISSING', `${rel}: the base build has no such file (new unit?); delta needs a base for every file (use --delta off)`);
+      const baseHbc = join(delta.baseDir, be.file);
+      if (!existsSync(baseHbc)) {
+        throw new BuildError('DELTA_BASE_MISSING', `${baseHbc} is missing: delta compile needs the base .hbc BYTES (host.hbc, units/*.hbc), not just hashes. Restore the archived base release files (ota-build archive-base) or pass --delta off`);
+      }
+      const baseHbcHash = hashFile(baseHbc); // verifyBuildDir already proved it equals be.hash
+      const baseJs = delta.baseB.delta?.files[rel]?.js;
+      if (baseJs !== undefined && baseJs === jsHash) copyFileSync(baseHbc, outFile); // unchanged source: byte-identical to the embedded file, guaranteed
+      else compileHbc(h, jsFile, work, outFile, label, baseHbc);
+      deltaFiles[rel] = { baseHbc: baseHbcHash, js: jsHash };
+    };
+    compileOne('host.hbc', join(js, 'host.js'), join(stage, 'host.hbc'), 'host');
+    for (const u of unitNames) compileOne(`units/${u}.hbc`, join(js, unitsJson.units[u].file), join(stage, 'units', `${u}.hbc`), `unit-${u}`);
     rmrf(work);
     copyFileSync(join(js, 'ids.json'), join(stage, 'ids.json'));
     copyFileSync(join(js, 'units.json'), join(stage, 'units.json'));
@@ -106,6 +186,7 @@ export async function bundle(o: BundleOptions): Promise<{ outDir: string; build:
       }])),
       ids: { file: 'ids.json', hash: hashFile(join(stage, 'ids.json')) },
       unitsMap: { file: 'units.json', hash: hashFile(join(stage, 'units.json')) },
+      delta: { enabled: !!delta, baseBuild: delta ? delta.baseBuildHash : null, files: deltaFiles },
     };
     writeFileSync(join(stage, 'build.json'), toJson(build));
 
@@ -139,6 +220,13 @@ export function verifyBuildDir(dir: string): BuildJson {
   for (const [, u] of Object.entries(b.units)) check(u.file, u.hash);
   check(b.ids.file, b.ids.hash);
   check(b.unitsMap.file, b.unitsMap.hash);
+  if (b.delta) {
+    const want = [b.host.file, ...Object.values(b.units).map((u) => u.file)].sort().join();
+    if (Object.keys(b.delta.files).sort().join() !== want) throw new BuildError('BAD_BUILD', `${root}: delta.files does not list exactly host + units`);
+    if (b.delta.enabled !== (b.delta.baseBuild !== null) || (b.delta.enabled && Object.values(b.delta.files).some((x) => !x.baseHbc))) {
+      throw new BuildError('BAD_BUILD', `${root}: inconsistent delta record (enabled, baseBuild, baseHbc)`);
+    }
+  }
   return b;
 }
 

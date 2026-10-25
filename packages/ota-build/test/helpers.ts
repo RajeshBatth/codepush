@@ -40,3 +40,4 @@ export function runBin(bin: string, args: string[]): { status: number | null; st
   const r = spawnSync(bin, args, { encoding: 'utf8', env: childEnv(), timeout: 120_000, killSignal: 'SIGKILL' });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
+export const TWO_PACKAGE_APP = join(REPO_ROOT, 'examples/two-package-app');

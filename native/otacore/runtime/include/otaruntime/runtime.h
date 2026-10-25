@@ -4,7 +4,9 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -18,6 +20,32 @@ struct UnitConfig {
   std::string entryModuleId;  // module the unit registers its component from
 };
 
+// Lock scope of a unit's selection (which patch id, or embedded).
+enum class Pin {
+  Vm,       // default: decided when the unit is first loaded into a VM, fixed for that VM's life; a NEW VM re-resolves
+            // from the latest manifest (adopts a newer patch, drops a blacklisted/halted one)
+  Process,  // opt-in: decided once per process and kept across VM recreation (units with live state outside the VM),
+            // dropped only by the safety exceptions when a new VM resolves the unit
+};
+// When a selected patch is downloaded and applied.
+enum class Fetch {
+  Eager,  // default: prefetched in the background as soon as the manifest selects it
+  Lazy,   // no prefetch: the download+apply starts at the unit's first request (bounded by loadBudgetMs); a patch already
+          // on disk is still verified in the background. Wifi/cellular size cap applies unchanged.
+};
+// Every field is optional so that a per-unit policy overrides only what it names.
+struct UnitPolicy {
+  std::optional<Pin> pin;
+  // How long openUnit/loadUnit waits for a SELECTED patch that is not built yet. Unset = Config::unitBudgetMs.
+  // 0 = latency-first: never wait, load embedded at once; the patch is used by the next resolution.
+  std::optional<Millis> loadBudgetMs;
+  std::optional<Fetch> fetch;
+
+  static UnitPolicy latencyFirst() { UnitPolicy p; p.pin = Pin::Vm; p.loadBudgetMs = 0; p.fetch = Fetch::Eager; return p; }
+  static UnitPolicy freshnessFirst(Millis ms) { UnitPolicy p; p.pin = Pin::Vm; p.loadBudgetMs = ms; p.fetch = Fetch::Eager; return p; }
+  static UnitPolicy stable() { UnitPolicy p; p.pin = Pin::Process; return p; }
+};
+
 struct Config {
   // identity of this binary (must match the signed manifest)
   std::string platform, appVersion, buildNumber;
@@ -29,9 +57,15 @@ struct Config {
   std::string hostBucketKey = "mainBundle";  // bucket(deviceId, key) decides the host rollout
   std::vector<UnitConfig> units;
 
+  // Version stability and load behaviour are a POLICY PER UNIT (README "Unit policy"). `defaultPolicy` applies to every
+  // unit; `unitPolicy[unit]` overrides it field by field (unset fields fall through to defaultPolicy, then to the
+  // built-in defaults: pin=Vm, loadBudgetMs=unitBudgetMs, fetch=Eager).
+  UnitPolicy defaultPolicy;
+  std::map<std::string, UnitPolicy> unitPolicy;
+
   // tunables (DESIGN 5.8 [DECIDE]s)
   Millis hostSettleMs = 800;
-  Millis unitBudgetMs = 1000;
+  Millis unitBudgetMs = 1000;  // default loadBudgetMs of a unit
   bool prewarm = true;
   bool recreateAtZeroViews = true;  // 5.4 open question: recreate VM at the next zero-views moment
   int crashLimitK = 2;              // unconfirmed process attempts before a patch is blacklisted
@@ -113,6 +147,8 @@ class Runtime {
   bool isBlacklisted(const std::string& entryId) const;
   // "" (not pinned) | "loading" | "embedded" | "patch:<id>" | "failed"
   std::string pinOf(const std::string& unit) const;
+  // "" (nothing frozen) | "embedded" | "patch:<id>": the process-wide frozen selection of a unit (pin=Process only).
+  std::string frozenOf(const std::string& unit) const;
 
  private:
   struct Impl;

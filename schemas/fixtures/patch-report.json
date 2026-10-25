@@ -2,10 +2,11 @@
   "schema": 1,
   "platform": "android",
   "appVersion": "11.9.0",
-  "base": "sha256:76a5e1e5e39e8e5fd254f45748a594d6fbe28a325af938f40fc9d404f065dd39",
-  "new": "sha256:63856d5a802f672dc66d58cc7b4d79de7b5f562812a6ef1a97fcc655e093ffb4",
+  "base": "sha256:d62dd21db4efd633c2ceb42adffbad5f0c88ece50e65e9068c62f91ff1fa847d",
+  "new": "sha256:888b33645facbec2e5e254fe7b1814d53610910592c648d24efe814ee02c7b16",
   "baseSourceSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "newSourceSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "deltaMode": true,
   "hostChanged": false,
   "changedUnits": [
     "cabs"
@@ -14,14 +15,16 @@
   "items": [
     {
       "unit": "cabs",
-      "patchFile": "cabs.android.0ef871d161ec-fd0eed1957cc.delta.hdiff",
-      "patchSize": 333,
+      "patchFile": "cabs.android.0ef871d161ec-4ed310958d1c.delta.hdiff",
+      "patchSize": 251,
       "updateType": "patch",
-      "builtHash": "sha256:fd0eed1957cc32b2b56bae404039d071fc6e3bcf3d8897651ad7c289c80b7726",
+      "builtHash": "sha256:4ed310958d1cf3c9387e954912166bade2742181d79ed00bd2375912a131b27e",
       "baseHash": "sha256:0ef871d161ec72843e00b0b3a681e2c27220483da22ff792d610e4c5f4d520fd",
-      "ratioOfZstdFull": 0.3886,
-      "deltaPatchSize": 333,
-      "newZstdSize": 857
+      "ratioOfZstdFull": 0.2925,
+      "deltaPatchSize": 251,
+      "newZstdSize": 858,
+      "plainEquivalentSize": 333,
+      "deltaOverPlain": 0.7538
     }
   ],
   "toolchain": {

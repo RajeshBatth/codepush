@@ -19,5 +19,5 @@
   "jobUrl": "https://ci.example.com/job/ota-deploy/7",
   "ts": "2026-01-01T00:00:00.000Z",
   "previousVersion": 2,
-  "prevAuditHash": "sha256:282a48b3ff218a4ff951dd30205002ec1e71987252d7c690261addda55ff7ff6"
+  "prevAuditHash": "sha256:06df5f73241fc1c766e86c4931406bb0bb46cb910c95227f5421806dfa3e8e54"
 }

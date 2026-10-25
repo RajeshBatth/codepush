@@ -10,6 +10,7 @@ export const WORK = path.join(REPO, '.work');
 export const { bundle } = await import(path.join(REPO, 'packages/ota-build/src/bundle.ts'));
 export const { compileHbc } = await import(path.join(REPO, 'packages/ota-build/src/bundle.ts'));
 export const { resolveHermesc } = await import(path.join(REPO, 'packages/ota-build/src/tools.ts'));
+export const { createPatches } = await import(path.join(REPO, 'packages/ota-build/src/patch.ts'));
 export const { hashId } = await import(path.join(REPO, 'packages/unit-splitter/src/ids.js'));
 
 export const sha256 = (buf) => 'sha256:' + createHash('sha256').update(buf).digest('hex');

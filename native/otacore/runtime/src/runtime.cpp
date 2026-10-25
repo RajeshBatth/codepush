@@ -68,12 +68,19 @@ struct Op {
   OpenCallback cb;
 };
 
-struct Pin {
+struct UnitPin {
   enum St { Loading, Loaded, Failed } st = Loading;
   bool patch = false;
   std::string patchId, error, waitingArt;
   TimerId timer = 0;
   std::vector<Op> waiters;
+  std::string reason;  // why this outcome (for the freeze event)
+};
+
+// Per-process selection freeze (README "Per-process selection freeze").
+struct Frozen {
+  bool patch = false;
+  std::string id, hash;
 };
 
 enum class Acc { Applied, Same, BadSig, Invalid, WrongTarget, Replay, StoreFail };
@@ -123,7 +130,8 @@ struct Runtime::Impl {
   // VM
   VmState vm = VmState::None;
   std::string runningHost = kEmbedded, pendingHost = kEmbedded;
-  std::map<std::string, Pin> pins;
+  std::map<std::string, UnitPin> pins;
+  std::map<std::string, Frozen> frozen;  // process lifetime; survives VM recreation
   std::vector<Op> pendingOps;
   bool pendingRecreate = false, poisoned = false, settleExpired = false;
   TimerId settleTimer = 0;
@@ -198,8 +206,59 @@ struct Runtime::Impl {
   }
   int loadsInFlight() const {
     int n = 0;
-    for (auto& kv : pins) if (kv.second.st == Pin::Loading) n++;
+    for (auto& kv : pins) if (kv.second.st == UnitPin::Loading) n++;
     return n;
+  }
+
+  // Effective policy of a unit: per-unit field, else defaultPolicy field, else the built-in default.
+  Pin pinOfUnit(const std::string& unit) const {
+    auto it = cfg.unitPolicy.find(unit);
+    if (it != cfg.unitPolicy.end() && it->second.pin) return *it->second.pin;
+    return cfg.defaultPolicy.pin.value_or(Pin::Vm);
+  }
+  Millis budgetOf(const std::string& unit) const {
+    auto it = cfg.unitPolicy.find(unit);
+    if (it != cfg.unitPolicy.end() && it->second.loadBudgetMs) return std::max<Millis>(0, *it->second.loadBudgetMs);
+    return std::max<Millis>(0, cfg.defaultPolicy.loadBudgetMs.value_or(cfg.unitBudgetMs));
+  }
+  Fetch fetchOf(const std::string& unit) const {
+    auto it = cfg.unitPolicy.find(unit);
+    if (it != cfg.unitPolicy.end() && it->second.fetch) return *it->second.fetch;
+    return cfg.defaultPolicy.fetch.value_or(Fetch::Eager);
+  }
+  bool freezes(const std::string& unit) const { return pinOfUnit(unit) == Pin::Process; }
+  const char* scopeName(const std::string& unit) const { return freezes(unit) ? "process" : "vm"; }
+  void freezeNow(const std::string& unit, const UnitPin& pin) {
+    const std::string detail = std::string(pin.patch ? "patch" : "embedded") + ":" + pin.reason + " scope=" + scopeName(unit);
+    if (!freezes(unit)) {  // pin=vm: the selection is fixed for this VM only (nothing is memoized)
+      emit("selection-frozen", unit, pin.patchId, detail);
+      return;
+    }
+    Frozen f;
+    f.patch = pin.patch;
+    f.id = pin.patchId;
+    if (pin.patch && snap) {
+      for (auto& u : snap->units) {
+        if (u.unitName != unit) continue;
+        for (auto& e : u.entries) if (e.id == f.id) f.hash = e.hash;
+      }
+    }
+    auto old = frozen.find(unit);
+    const bool same = old != frozen.end() && old->second.patch == f.patch && old->second.id == f.id;
+    frozen[unit] = f;
+    if (same) return;  // a reused freeze is not announced again
+    emit("selection-frozen", unit, f.id, detail);
+  }
+  void dropFreeze(const std::string& unit, const std::string& reason) {
+    auto it = frozen.find(unit);
+    if (it == frozen.end()) return;
+    emit("selection-dropped", unit, it->second.id, reason + " scope=process");
+    frozen.erase(it);
+  }
+  // Drops the freeze when it points at patch `id` (a failure while loading that very patch).
+  void dropFreezeIfPatch(const std::string& unit, const std::string& id, const std::string& reason) {
+    auto it = frozen.find(unit);
+    if (it != frozen.end() && it->second.patch && it->second.id == id) dropFreeze(unit, reason);
   }
 
   // ------------------------------------------------------------------ crash-loop guard / blacklist
@@ -438,6 +497,9 @@ struct Runtime::Impl {
     int rank = 1;
     for (const UnitConfig* u : order) {
       auto sel = otacore::selectUnit(*snap, u->name, unitCtx(*u, tgt));
+      // fetch=lazy: no download before the first request; a patch already on disk is only verified.
+      if (sel.source == otacore::Source::Patch && fetchOf(u->name) == Fetch::Lazy && !arts.count(sel.entry->id) &&
+          !cache->has(sel.entry->id)) { rank++; continue; }
       if (sel.source == otacore::Source::Patch) considerEntry(*sel.entry, false, u->name, rank, resetFailed);
       rank++;
     }
@@ -646,9 +708,9 @@ struct Runtime::Impl {
     const AS st = it->second.s;
     const bool isHost = it->second.isHost;
     std::vector<std::string> units;
-    for (auto& kv : pins) if (kv.second.st == Pin::Loading && kv.second.waitingArt == id) units.push_back(kv.first);
+    for (auto& kv : pins) if (kv.second.st == UnitPin::Loading && kv.second.waitingArt == id) units.push_back(kv.first);
     for (auto& u : units) {
-      Pin& pin = pins[u];
+      UnitPin& pin = pins[u];
       if (st == AS::Ready) {
         cancelTimer(pin.timer);
         pin.waitingArt.clear();
@@ -656,7 +718,7 @@ struct Runtime::Impl {
       } else if (!waitable(st)) {
         cancelTimer(pin.timer);
         pin.waitingArt.clear();
-        evaluateEmbedded(u);
+        evaluateEmbedded(u, "artifact-unavailable");
       }
     }
     if (isHost) {
@@ -876,65 +938,130 @@ struct Runtime::Impl {
     const std::string unit = op.unit;
     if (!findUnit(unit)) { fail(op, "unknown-unit"); return; }
     auto it = pins.find(unit);
+    // A failure is never frozen: with the freeze on, a new request re-decides instead of replaying the error, but ONLY in a
+    // CLEAN VM. A poisoned VM (a patch entry threw after its modules registered; Metro ignores re-registration) must not be
+    // asked to evaluate anything until it is replaced, so there the failed pin stays failed (DESIGN.md 5.8 decision 5).
+    if (it != pins.end() && it->second.st == UnitPin::Failed && freezes(unit) && !poisoned) { pins.erase(it); it = pins.end(); }
     const bool fresh = it == pins.end();
-    Pin& pin = fresh ? pins[unit] : it->second;
+    UnitPin& pin = fresh ? pins[unit] : it->second;
     pin.waiters.push_back(std::move(op));
     if (fresh) resolve(unit);
-    else if (pin.st != Pin::Loading) serve(unit);
+    else if (pin.st != UnitPin::Loading) serve(unit);
   }
 
   // 5.2 steps 2-3 for one unit, pinned for the lifetime of this VM.
+  // Re-validates a frozen patch selection when a NEW VM resolves the unit (safety exceptions a, b, c).
+  // Returns "" when the freeze holds, otherwise the reason it was dropped.
+  std::string frozenPatchProblem(const std::string& unit, const Frozen& f) {
+    if (!snap || !cacheOk) return "no-manifest";
+    if (bad.count(f.id)) return "blacklisted";
+    const otacore::Entry* found = nullptr;
+    for (auto& u : snap->units) {
+      if (u.unitName != unit) continue;
+      for (auto& e : u.entries) if (e.id == f.id) found = &e;
+    }
+    if (!found) return "removed-from-manifest";
+    if (found->hash != f.hash) return "entry-changed";
+    auto sel = otacore::selectUnit(*snap, unit, unitCtx(*findUnit(unit), runningHost));
+    if (sel.source != otacore::Source::Patch || sel.entry->id != f.id) {
+      return sel.source == otacore::Source::Patch ? "range-excluded" : sel.reason;
+    }
+    if (!usable(*found)) return "blacklisted";  // crash-loop limit applied now
+    auto it = arts.find(f.id);
+    if (it == arts.end() || it->second.s != AS::Ready) return "file-missing";
+    Check c = preEvaluate(f.id);
+    if (!c.ok) {
+      if (c.persistent) markBad(f.id, c.why);
+      return "pre-evaluate-failed:" + c.why;
+    }
+    return "";
+  }
+
   void resolve(const std::string& unit) {
     const UnitConfig* uc = findUnit(unit);
-    if (!snap || !cacheOk) { evaluateEmbedded(unit); return; }
+    if (freezes(unit)) {
+      auto f = frozen.find(unit);
+      if (f != frozen.end()) {
+        if (!f->second.patch) {
+          emit("selection-reused", unit, "", "embedded scope=process");
+          evaluateEmbedded(unit, "frozen");
+          return;
+        }
+        const Frozen fz = f->second;
+        std::string why = frozenPatchProblem(unit, fz);
+        if (why.empty()) {
+          emit("selection-reused", unit, fz.id, "patch scope=process");
+          pins[unit].reason = "frozen";
+          loadPatchIntoPin(unit, fz.id);
+          return;
+        }
+        dropFreeze(unit, why);  // then the normal selection runs against the latest manifest
+      }
+    }
+    if (!snap || !cacheOk) { evaluateEmbedded(unit, "no-manifest"); return; }
     auto sel = otacore::selectUnit(*snap, unit, unitCtx(*uc, runningHost));
     if (sel.source != otacore::Source::Patch || !usable(*sel.entry)) {
+      const std::string why = sel.source != otacore::Source::Patch ? sel.reason : "blacklisted";
       emit("select-embedded", unit, "", sel.reason);
-      evaluateEmbedded(unit);
+      evaluateEmbedded(unit, why);
       return;
     }
     const otacore::Entry e = *sel.entry;
     considerEntry(e, false, unit, -1, false);
     auto it = arts.find(e.id);
-    if (it == arts.end()) { evaluateEmbedded(unit); return; }
+    if (it == arts.end()) { evaluateEmbedded(unit, "artifact-missing"); return; }
     it->second.rank = -1;  // the user is waiting: promote ahead of prefetch
     if (it->second.s == AS::Absent) it->second.s = AS::Queued;
     if (it->second.s == AS::Queued) pump();
     it = arts.find(e.id);
-    if (it == arts.end()) { evaluateEmbedded(unit); return; }
+    if (it == arts.end()) { evaluateEmbedded(unit, "artifact-missing"); return; }
     switch (it->second.s) {
-      case AS::Ready: loadPatchIntoPin(unit, e.id); return;
-      case AS::Bad: case AS::Failed: case AS::Absent: evaluateEmbedded(unit); return;
+      case AS::Ready: pins[unit].reason = "ok"; loadPatchIntoPin(unit, e.id); return;
+      case AS::Bad: case AS::Failed: case AS::Absent: evaluateEmbedded(unit, "artifact-unavailable"); return;
       default: break;
     }
-    Pin& pin = pins[unit];
+    const Millis budget = budgetOf(unit);
+    if (budget <= 0) {  // latency-first: never wait; the (promoted) download/build continues for the next resolution
+      emit("budget-exceeded", unit, "", "no-wait");
+      evaluateEmbedded(unit, "budget-exceeded");
+      return;
+    }
+    UnitPin& pin = pins[unit];
     pin.waitingArt = e.id;
-    pin.timer = after(cfg.unitBudgetMs, [this, unit] {
+    pin.reason = "ok";
+    pin.timer = after(budget, [this, unit] {
       auto p = pins.find(unit);
-      if (p == pins.end() || p->second.st != Pin::Loading || p->second.waitingArt.empty()) return;
+      if (p == pins.end() || p->second.st != UnitPin::Loading || p->second.waitingArt.empty()) return;
       p->second.timer = 0;
       p->second.waitingArt.clear();
       emit("budget-exceeded", unit, "");
-      evaluateEmbedded(unit);
+      evaluateEmbedded(unit, "budget-exceeded");
     });
   }
 
   void loadPatchIntoPin(const std::string& unit, const std::string& id) {
     const UnitConfig* uc = findUnit(unit);
-    Pin& pin = pins[unit];
+    UnitPin& pin = pins[unit];
     Check c = preEvaluate(id);
     if (!c.ok) {
       emit("pre-evaluate-failed", unit, id, c.why);
       if (c.persistent) markBad(id, c.why);
-      evaluateEmbedded(unit);
+      dropFreezeIfPatch(unit, id, "pre-evaluate-failed:" + c.why);
+      evaluateEmbedded(unit, "pre-evaluate-failed");
       return;
     }
-    if (!bumpAttempt(id)) { emit("attempt-persist-failed", unit, id); evaluateEmbedded(unit); return; }
+    if (!bumpAttempt(id)) {
+      emit("attempt-persist-failed", unit, id);
+      dropFreezeIfPatch(unit, id, "attempt-persist-failed");
+      evaluateEmbedded(unit, "attempt-persist-failed");
+      return;
+    }
     std::string err;
     if (!d.vm->evaluateUnit(*c.buf, "ota://" + unit + "/" + id + ".hbc", err)) {
       emit("evaluate-failed", unit, id, err);
       markBad(id, "evaluate-failed");
-      evaluateEmbedded(unit);  // a failed evaluate registered nothing: the VM is clean
+      dropFreezeIfPatch(unit, id, "evaluate-failed");
+      evaluateEmbedded(unit, "evaluate-failed");  // a failed evaluate registered nothing: the VM is clean
       return;
     }
     if (!d.vm->requireEntry(uc->entryModuleId, err)) {
@@ -942,36 +1069,41 @@ struct Runtime::Impl {
       // patch, fail this load, and replace the VM at the next zero-views moment.
       emit("entry-failed", unit, id, err);
       markBad(id, "entry-failed");
+      dropFreezeIfPatch(unit, id, "entry-failed");
       poisoned = true;
       failPin(unit, "entry-failed: " + err);
       considerRecreate(true);
       return;
     }
-    pin.st = Pin::Loaded;
+    pin.st = UnitPin::Loaded;
     pin.patch = true;
     pin.patchId = id;
     emit("unit-loaded", unit, id, "patch");
+    if (pin.reason == "frozen") pin.reason = "ok";
+    freezeNow(unit, pin);
     serve(unit);
   }
 
-  void evaluateEmbedded(const std::string& unit) {
+  void evaluateEmbedded(const std::string& unit, const std::string& why) {
     const UnitConfig* uc = findUnit(unit);
-    Pin& pin = pins[unit];
+    UnitPin& pin = pins[unit];
+    pin.reason = why;
     std::string err;
     auto buf = d.assets->open(unit);
     if (!buf) { failPin(unit, "embedded-missing"); return; }
     if (!d.vm->evaluateUnit(*buf, "ota://" + unit + "/embedded.hbc", err)) { failPin(unit, "embedded-evaluate-failed: " + err); return; }
     if (!d.vm->requireEntry(uc->entryModuleId, err)) { failPin(unit, "embedded-entry-failed: " + err); return; }
-    pin.st = Pin::Loaded;
+    pin.st = UnitPin::Loaded;
     pin.patch = false;
     pin.patchId.clear();
     emit("unit-loaded", unit, "", "embedded");
+    freezeNow(unit, pin);
     serve(unit);
   }
 
   void failPin(const std::string& unit, const std::string& err) {
-    Pin& pin = pins[unit];
-    pin.st = Pin::Failed;
+    UnitPin& pin = pins[unit];
+    pin.st = UnitPin::Failed;
     pin.error = err;
     emit("unit-failed", unit, "", err);
     serve(unit);
@@ -981,11 +1113,11 @@ struct Runtime::Impl {
     auto ws = std::move(pins[unit].waiters);
     pins[unit].waiters.clear();
     for (auto& op : ws) {
-      Pin& pin = pins[unit];
+      UnitPin& pin = pins[unit];
       OpenResult r;
       r.source = pin.patch ? "patch" : "embedded";
       r.patchId = pin.patchId;
-      if (pin.st == Pin::Failed) {
+      if (pin.st == UnitPin::Failed) {
         r.error = pin.error;
         r.source.clear();
       } else if (op.open) {
@@ -1002,7 +1134,7 @@ struct Runtime::Impl {
 
   void markReady(const std::string& unit) {
     auto it = pins.find(unit);
-    if (it == pins.end() || it->second.st != Pin::Loaded) return;
+    if (it == pins.end() || it->second.st != UnitPin::Loaded) return;
     if (it->second.patch) {
       d.store->erase(kAttempts(it->second.patchId));
       attempted.erase(it->second.patchId);
@@ -1057,13 +1189,18 @@ std::string Runtime::artifactState(const std::string& id) const {
   return it == p_->arts.end() ? "unknown" : asName(it->second.s);
 }
 bool Runtime::isBlacklisted(const std::string& id) const { return p_->bad.count(id) > 0; }
+std::string Runtime::frozenOf(const std::string& unit) const {
+  auto it = p_->frozen.find(unit);
+  if (it == p_->frozen.end()) return "";
+  return it->second.patch ? "patch:" + it->second.id : "embedded";
+}
 std::string Runtime::pinOf(const std::string& unit) const {
   auto it = p_->pins.find(unit);
   if (it == p_->pins.end()) return "";
   switch (it->second.st) {
-    case Pin::Loading: return "loading";
-    case Pin::Failed: return "failed";
-    case Pin::Loaded: return it->second.patch ? "patch:" + it->second.patchId : "embedded";
+    case UnitPin::Loading: return "loading";
+    case UnitPin::Failed: return "failed";
+    case UnitPin::Loaded: return it->second.patch ? "patch:" + it->second.patchId : "embedded";
   }
   return "";
 }

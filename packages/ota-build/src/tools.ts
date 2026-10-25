@@ -141,6 +141,17 @@ function resolveNative(name: string, flagName: string, envNames: string[], expli
 export const resolveHdiffz = (explicit?: string): ToolInfo => resolveNative('hdiffz_tool', '--hdiffz', ['OTA_HDIFFZ', 'OTA_HDIFFZ_TOOL'], explicit);
 export const resolveOtaApply = (explicit?: string): ToolInfo => resolveNative('ota_apply', '--ota-apply', ['OTA_APPLY'], explicit);
 
+const deltaSupportCache = new Map<string, boolean>();
+/** True if `hermesc -help` lists `-base-bytecode` (Hermes delta optimizing mode; present in the pinned RN 0.78.3 hermesc). */
+export function hermescSupportsBaseBytecode(hermescPath: string): boolean {
+  const hit = deltaSupportCache.get(hermescPath);
+  if (hit !== undefined) return hit;
+  const r = run(hermescPath, ['-help'], { cwd: dirname(hermescPath), timeoutMs: 30_000 });
+  const ok = /^\s*-base-bytecode\b/m.test(r.stdout + r.stderr);
+  deltaSupportCache.set(hermescPath, ok);
+  return ok;
+}
+
 export interface ToolStatus { name: string; ok: boolean; path?: string; sha256?: string; detail: string; origin?: Origin }
 /** For `fetch-tools` / tests: report what is available without throwing. */
 export function toolStatus(): ToolStatus[] {

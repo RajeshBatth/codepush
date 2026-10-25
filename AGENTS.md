@@ -39,7 +39,7 @@ bash scripts/test-all.sh               # all suites (add --fast to skip the slow
 node packages/ota-build/src/cli.ts doctor --project <app dir> [--platform android|ios] [--deep]   # project readiness
 cd packages/<pkg> && npm test          # one package (ota-core also: node ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.json)
 ```
-Expected today: ota-core 155 (+ typecheck), ota-cli 76, unit-splitter 83, ota-build 39, native ctest 41.
+Expected today: ota-core 166 (+ typecheck), ota-cli 76, unit-splitter 103, ota-build 57, native ctest 72.
 
 **Environment quirks (they bite spawned shells and CI):** `node`/`npm` are lazy-loaded shell functions here, so subprocesses do not see them: `N=$(ls -d ~/.nvm/versions/node/v24*/bin); export PATH=$N:/opt/homebrew/bin:$PATH` (or `source scripts/env.sh`). `/usr/local/bin/clang*` are broken ccache symlinks: pass `-DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++`. Use `.work/` (gitignored) for scratch, not `/tmp`. Never leave long-running processes (emulators, Gradle daemons, hung shells).
 
@@ -59,4 +59,4 @@ Expected today: ota-core 155 (+ typecheck), ota-cli 76, unit-splitter 83, ota-bu
 - Prefer small, deterministic tests with temp dirs under `.work/` that are cleaned up.
 
 ## Not done yet (do not assume it exists)
-Reusable Android library / iOS pod extracted from the spike glue; Jenkins job definitions; Jira wiring; real S3/CDN/KMS adapters; the asset rule (patched units may only reference assets already in the binary); native-module scan (Tier 1 rule 5); iOS tests run on a simulator/device; `preloadUnit` and the host-init hook; Linux/Windows runs of the toolchain. Spec items not yet in code: `verifyPinPr` is never called outside tests (no Jenkins verify job), rebuild-hash-equals-verify gate, stale-pin refusal, pinned-image build in verify, KMS signature on `audit.json`, SDK `getActivePatch` and lifecycle callbacks. `ota-cli` trusts `--requester/--approver/--ticket/--pr` (the Jenkins/Jira layer must supply them).
+Reusable Android library / iOS pod extracted from the spike glue; Jenkins job definitions; Jira wiring; real S3/CDN/KMS adapters; the native-side module inventory (the implemented native-module scan derives its inventory from the BASE JS graph only: a module that is in the binary but unused by the base JS cannot be adopted OTA) and `contractHash`; a first-party host-file native-reference check in patches; iOS tests run on a simulator/device; `preloadUnit` and the host-init hook; Linux/Windows runs of the toolchain. Spec items not yet in code: `verifyPinPr` is never called outside tests (no Jenkins verify job), rebuild-hash-equals-verify gate, stale-pin refusal, pinned-image build in verify, KMS signature on `audit.json`, SDK `getActivePatch` and lifecycle callbacks. `ota-cli` trusts `--requester/--approver/--ticket/--pr` (the Jenkins/Jira layer must supply them).

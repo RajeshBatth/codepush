@@ -34,7 +34,7 @@ const SCHEMA_FIXTURES: Record<string, string[]> = {
   'ota-units-governance': ['ota-units-governance.json'],
   'units.config': ['units.config.json'],
   'units.output': ['units.output.json'],
-  build: ['build.json'],
+  build: ['build.json', 'build.base.json'],
   'patch-report': ['patch-report.json'],
 };
 const schemaFiles = readdirSync(SCHEMAS).filter((f) => f.endsWith('.schema.json')).sort();
@@ -121,6 +121,13 @@ describe('schemas: real artifacts validate', () => {
     assert.deepEqual(Object.keys(base.units).sort(), Object.keys(build.units).sort());
     // manifest baseHash == embedded hash from base.json (android fixture)
     for (const u of m.units) assert.equal(u.baseHash, base.units[u.unitName][m.platform]);
+    // delta record: the patch build is delta-compiled, the base build is not; both list exactly host + units
+    assert.equal(build.delta.enabled, true);
+    assert.equal(fixture('build.base.json').delta.enabled, false);
+    assert.equal(rep.deltaMode, build.delta.enabled);
+    for (const b of [build, fixture('build.base.json')]) {
+      assert.deepEqual(Object.keys(b.delta.files).sort(), ['host.hbc', ...Object.values<any>(b.units).map((u) => u.file)].sort());
+    }
     // patch-report is consistent with itself
     assert.equal(rep.hostChanged, rep.items.some((i: any) => i.unit === 'host'));
     assert.deepEqual(rep.changedUnits, rep.items.filter((i: any) => i.unit !== 'host').map((i: any) => i.unit));
@@ -232,6 +239,12 @@ const NEGATIVE: Record<string, Mut[]> = {
     ['unitsMap.hash malformed', 'build.json', (d) => { d.unitsMap.hash = 'sha256:1'; }],
     ['platform enum', 'build.json', (d) => { d.platform = 'macos'; }],
     ['unknown property', 'build.json', (d) => { d.builtAt = 'now'; }],
+    ['delta without enabled', 'build.json', (d) => { delete d.delta.enabled; }],
+    ['delta.baseBuild malformed', 'build.json', (d) => { d.delta.baseBuild = 'abc'; }],
+    ['delta file without js hash', 'build.json', (d) => { delete d.delta.files['host.hbc'].js; }],
+    ['delta file baseHbc malformed', 'build.json', (d) => { d.delta.files['host.hbc'].baseHbc = 'sha256:1'; }],
+    ['delta file unknown property', 'build.json', (d) => { d.delta.files['host.hbc'].extra = 1; }],
+    ['delta enabled is a string', 'build.base.json', (d) => { d.delta.enabled = 'false'; }],
   ],
   'patch-report': [
     ['missing algo', 'patch-report.json', (d) => { delete d.algo; }],
@@ -242,6 +255,10 @@ const NEGATIVE: Record<string, Mut[]> = {
     ['base hash without prefix', 'patch-report.json', (d) => { d.base = d.base.slice(7); }],
     ['changedUnits contains a number', 'patch-report.json', (d) => { d.changedUnits = [1]; }],
     ['unknown item property', 'patch-report.json', (d) => { d.items[0].extra = 1; }],
+    ['missing deltaMode', 'patch-report.json', (d) => { delete d.deltaMode; }],
+    ['deltaMode is a string', 'patch-report.json', (d) => { d.deltaMode = 'true'; }],
+    ['plainEquivalentSize negative', 'patch-report.json', (d) => { d.items[0].plainEquivalentSize = -1; }],
+    ['deltaOverPlain is a string', 'patch-report.json', (d) => { d.items[0].deltaOverPlain = '0.1'; }],
     ['schema 2', 'patch-report.json', (d) => { d.schema = 2; }],
   ],
 };
@@ -336,7 +353,7 @@ describe('schemas vs TypeScript types: no drift', () => {
       assert.deepEqual(Object.keys(s.properties).filter((k) => !optional.includes(k) || k in d).sort(), Object.keys(d).sort(), `${name}: top-level keys`);
       assert.deepEqual([...s.required].sort(), Object.keys(d).filter((k) => !optional.includes(k)).sort(), `${name}: required`);
     };
-    top('build', 'build.json');
+    top('build', 'build.json', ['delta']);
     top('patch-report', 'patch-report.json');
     top('units.output', 'units.output.json');
     top('manifest', 'manifest.json');
@@ -345,6 +362,9 @@ describe('schemas vs TypeScript types: no drift', () => {
     const rep = fixture('patch-report.json');
     assert.deepEqual(Object.keys(at('patch-report', 'items', '[]').properties).sort(), Object.keys(rep.items[0]).sort());
     assert.deepEqual(Object.keys(at('patch-report', 'algo').properties).sort(), Object.keys(rep.algo).sort());
+    assert.deepEqual(Object.keys(at('build', 'delta').properties).sort(), Object.keys(fixture('build.json').delta).sort());
+    assert.deepEqual([...at('build', 'delta').required].sort(), Object.keys(fixture('build.json').delta).sort());
+    assert.deepEqual(Object.keys(at('build', 'delta', 'files').additionalProperties.properties).sort(), Object.keys(fixture('build.json').delta.files['host.hbc']).sort());
     assert.deepEqual(Object.keys(at('build', 'toolchain').properties).sort(), Object.keys(fixture('build.json').toolchain).sort());
   });
 });

@@ -117,7 +117,18 @@
   "public-deep-import": {
    "severity": "error",
    "count": 0
+  },
+  "assets": {
+   "severity": "error",
+   "count": 0,
+   "total": 0
+  },
+  "native-modules": {
+   "severity": "error",
+   "count": 0,
+   "modules": 0
   }
  },
- "publicApi": {}
+ "publicApi": {},
+ "nativeRefs": {}
 }

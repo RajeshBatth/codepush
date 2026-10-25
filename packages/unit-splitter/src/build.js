@@ -60,7 +60,7 @@ export async function build({ projectRoot, outDir, approach = 'serializer', base
       customSerializer: makeSplitSerializer({ projectRoot, units, base: baseInfo, sink, approach, checks }),
     }));
   }
-  const { owner, graph, preModules, warnings = [], cycles = {}, checks: checksSummary = {}, publicApi = {} } = sink.analysis;
+  const { owner, graph, preModules, warnings = [], cycles = {}, checks: checksSummary = {}, publicApi = {}, assets = new Map(), nativeRefs = {} } = sink.analysis;
   const keyOf = (p) => pathKey(p, projectRoot);
 
   // id -> owner, id -> path
@@ -79,16 +79,11 @@ export async function build({ projectRoot, outDir, approach = 'serializer', base
     }
   }
 
-  // Asset modules (images) are ordinary modules in the graph, owned by path like any other. The asset FILES are not in any
-  // bundle: they must exist in the binary (android res/drawable-*, ios bundle). Listed here so a build can see which ones a unit needs.
-  const assetsByOwner = new Map();
-  for (const [p, m] of graph.dependencies) {
-    if (!m.output.some((o) => o.type === 'js/module/asset')) continue;
-    const o = owner.get(p);
-    if (!assetsByOwner.has(o)) assetsByOwner.set(o, []);
-    assetsByOwner.get(o).push({ path: keyOf(p), sha256: sha256(fs.readFileSync(p)) });
-  }
-  const assetsOf = (name) => (assetsByOwner.get(name) ?? []).sort((a, b) => (a.path < b.path ? -1 : 1));
+  // Asset modules (images, fonts that go through Metro's asset pipeline) are ordinary modules in the graph, owned by path like any
+  // other. The asset FILES are not in any bundle: they must exist in the binary (android res/drawable-*, ios bundle). units.json lists,
+  // per owner, every asset with its registered location/name (what the native resource name derives from) and all scale variants;
+  // a patch build is compared with the base's list (checks.assets, assets.js).
+  const assetsOf = (name) => assets.get(name) ?? [];
 
   const entryIdToUnit = new Map(units.map((u) => [ids.createModuleId(u.entry), u.name]));
   let result;
@@ -122,6 +117,8 @@ export async function build({ projectRoot, outDir, approach = 'serializer', base
     checks: checksSummary,
     // runtime export surface of each public (host-owned) package at this build; compared with the API snapshot file
     publicApi: Object.fromEntries(Object.entries(publicApi).sort()),
+    // native modules / views referenced by the JS of this build (host + units), the base a later patch build is compared against
+    nativeRefs,
   };
 
   fs.rmSync(outDir, { recursive: true, force: true });

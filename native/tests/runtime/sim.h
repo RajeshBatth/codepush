@@ -496,6 +496,9 @@ struct World : Observer {
   }
 };
 
+// True when the default policy locks selections per process (some expectations differ between the scopes).
+inline bool processPinned(const Config& c) { return c.defaultPolicy.pin.value_or(Pin::Vm) == Pin::Process; }
+
 inline Config baseConfig(Env& env) {
   Config c;
   c.platform = "android"; c.appVersion = "11.9.0"; c.buildNumber = "100";
@@ -505,6 +508,9 @@ inline Config baseConfig(Env& env) {
   c.hostEmbeddedHash = env.embeddedHash("host");
   c.units = {{"cabs", env.embeddedHash("cabs"), "100"}, {"bus", env.embeddedHash("bus"), "200"}};
   c.deviceId = env.deviceId;
+  // RT_PIN=process|vm (alias RT_FREEZE=1|0) sets the default pin of the whole suite; unset = the library default (vm).
+  if (const char* f = std::getenv("RT_PIN")) c.defaultPolicy.pin = std::strcmp(f, "process") == 0 ? Pin::Process : Pin::Vm;
+  else if (const char* z = std::getenv("RT_FREEZE")) c.defaultPolicy.pin = std::strcmp(z, "0") != 0 ? Pin::Process : Pin::Vm;
   return c;
 }
 

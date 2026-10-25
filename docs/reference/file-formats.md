@@ -80,9 +80,11 @@ Output of `ota-build bundle` for one platform (DESIGN.md 7.8 step 1). Lists the 
   "host":  { "file": "host.hbc", "hash": "sha256:c4ff...", "size": 28800, "zstdSize": 16046 },
   "units": { "cabs": { "file": "units/cabs.hbc", "hash": "sha256:0ef8...", "size": 1092, "zstdSize": 784, "entryModuleId": 11960423920495 } },
   "ids": { "file": "ids.json", "hash": "sha256:dacf..." },
-  "unitsMap": { "file": "units.json", "hash": "sha256:5259..." } }
+  "unitsMap": { "file": "units.json", "hash": "sha256:5259..." },
+  "delta": { "enabled": true, "baseBuild": "sha256:76a5...",
+             "files": { "host.hbc": { "baseHbc": "sha256:c4ff...", "js": "sha256:9d1e..." } } } }
 ```
-`unitsMap` is the splitter output (below); it is present in the fixture and not shown in the DESIGN.md example. Enforced in code: referenced files exist and match their hash (`verifyBuildDir` in [`bundle.ts`](../../packages/ota-build/src/bundle.ts)). Schema: [`build.schema.json`](../../schemas/build.schema.json); example: [`fixtures/build.json`](../../schemas/fixtures/build.json).
+`delta` (optional; absent in builds made before delta mode) records hermesc delta compile (`-base-bytecode`): `enabled`, `baseBuild` = sha256 of the base build's `build.json` (always the embedded base build; null when not enabled), and per `.hbc` file the sha256 of the base `.hbc` used (`baseHbc`, only when enabled) and of the JS compiled (`js`, always; an unchanged JS means the base `.hbc` is copied). Base builds and `--delta off` builds have `enabled: false`. The delta base `.hbc` bytes are not in the artifact store (only hashes in `base.json`): see `ota-build archive-base` in the [pipeline doc](../architecture/02-build-and-patch-pipeline.md). `unitsMap` is the splitter output (below); it is present in the fixture and not shown in the DESIGN.md example. Enforced in code: referenced files exist and match their hash (`verifyBuildDir` in [`bundle.ts`](../../packages/ota-build/src/bundle.ts)). Schema: [`build.schema.json`](../../schemas/build.schema.json); example: [`fixtures/build.json`](../../schemas/fixtures/build.json).
 
 ## Patch report (`patch-report.json`)
 
@@ -90,19 +92,22 @@ Output of `ota-build patch --base <build> --new <build>` per platform. Input of 
 
 ```json
 { "schema": 1, "platform": "android", "appVersion": "11.9.0", "base": "sha256:76a5...", "new": "sha256:6385...",
-  "baseSourceSha": "aaaa...", "newSourceSha": "bbbb...", "hostChanged": false, "changedUnits": ["cabs"], "idsChanged": false,
+  "baseSourceSha": "aaaa...", "newSourceSha": "bbbb...", "deltaMode": true, "hostChanged": false, "changedUnits": ["cabs"], "idsChanged": false,
   "items": [ { "unit": "cabs", "patchFile": "cabs.android.0ef871d161ec-fd0eed1957cc.delta.hdiff", "patchSize": 333,
                "updateType": "patch", "builtHash": "sha256:fd0e...", "baseHash": "sha256:0ef8...",
-               "ratioOfZstdFull": 0.3886, "deltaPatchSize": 333, "newZstdSize": 857 } ],
+               "ratioOfZstdFull": 0.3886, "deltaPatchSize": 333, "newZstdSize": 857,
+               "plainEquivalentSize": 365, "deltaOverPlain": 0.9123 } ],
   "toolchain": { "...": "same object as in build.json" },
   "algo": { "patchAlgoVer": "v1", "compressor": "zstd", "zstdLevel": 19, "minMatchScore": 4, "patchStepMemSize": 262144, "fullThreshold": 0.6 },
   "tools": { "hdiffz_tool": "sha256:6edd...", "ota_apply": "sha256:8987..." } }
 ```
-`updateType` becomes `full` when the patch would exceed `fullThreshold` (0.6) of the zstd size of the new bundle. `base`/`new` are hashes of the two `build.json` files. Enforced in code: `hostChanged`/`changedUnits` consistent with `items`. Schema: [`patch-report.schema.json`](../../schemas/patch-report.schema.json); example: [`fixtures/patch-report.json`](../../schemas/fixtures/patch-report.json). Pipeline details: [02-build-and-patch-pipeline.md](../architecture/02-build-and-patch-pipeline.md).
+`updateType` becomes `full` when the patch would exceed `fullThreshold` (0.6) of the zstd size of the new bundle. `base`/`new` are hashes of the two `build.json` files. `deltaMode` = the new build was compiled with `hermesc -base-bytecode`; `plainEquivalentSize` / `deltaOverPlain` (= `deltaPatchSize` / `plainEquivalentSize`) are present only with `ota-build patch --report-plain`. Enforced in code: `hostChanged`/`changedUnits` consistent with `items`. Schema: [`patch-report.schema.json`](../../schemas/patch-report.schema.json); example: [`fixtures/patch-report.json`](../../schemas/fixtures/patch-report.json). Pipeline details: [02-build-and-patch-pipeline.md](../architecture/02-build-and-patch-pipeline.md).
 
 ## Splitter output (`units.json` in the build dir)
 
 Written by `unit-splitter` next to `host.js` and `units/*.js`: module ids per bundle, async `paths`, cycles, check summaries and the recorded public API. Top-level keys (from the fixture): `format` (1), `platform`, `idBits` (48), `host` {`file`, `moduleIds`, `packages`, `assets`}, `paths` (entry module id -> unit name, used by `__loadBundleAsync`), `units` {name: `file`, `entryId`, `entryPath`, `moduleIds`, `packages`, `assets`}, `cycles` {host/unit: [...]}, `warnings`, `checks` {per rule family: `severity`, `count`, ...}, `publicApi`. The next patch build reads the base build's copy as "base" (cycle ratchet, `publicApi`). Enforced in code: id sets disjoint, `paths` target existing units. Schema: [`units.output.schema.json`](../../schemas/units.output.schema.json); example: [`fixtures/units.output.json`](../../schemas/fixtures/units.output.json). Rule ids: [rules-catalog.md](rules-catalog.md).
+
+Since the asset and native-module rules: `assets[]` entries also carry `name`, `type`, `httpServerLocation`, `scales`, `androidResource`, `iosPath` and `variants[]` (path + sha256 per scale), and there is a required top-level `nativeRefs` map `{ <ModuleName>: { owners: [...], methods: [...], kinds: ['module'|'turbo'|'view'] } }`. Patch builds compare both against the base build's `units.json` (`asset-not-in-base`, `asset-path-changed`, `native-module-new`; see [rules-catalog.md](rules-catalog.md)). Native glue must take Android resource names from `assets[].androidResource` instead of deriving them.
 
 ## Audit (`audit.json`)
 

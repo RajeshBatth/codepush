@@ -1,0 +1,5 @@
+strings 2704; kind runs (from the "String Kind Entry" table): identifier x255 from id 0, string x1534 from id 256, identifier x915 from id 1790
+first 12 identifier ids: 0:ArgumentOutOfRangeError  1:RangeError  2:Error  3:__spreadArray  4:Array  5:AsyncSubject  6:Subject  7:COMPLETE_NOTIFICATION  8:ColdObservable  9:Observable  10:ConnectableObservable  11:_originalDate
+first 8 plain-string ids: 256:"../util/ArgumentOu"  257:"util"  258:"A"  259:"ArgumentOutOfRange"  260:"o"  261:"r"  262:"__lodash_hash_unde"  263:"lodash"
+adjacent pairs in ascending alphabetical order: plain strings 75.0%, identifiers (ids >= 256) 77.9%  (50% = random, 100% = sorted)
+adjacent ids with increasing storage offset: 99.9% (the final id order follows packed-storage order, not first use)

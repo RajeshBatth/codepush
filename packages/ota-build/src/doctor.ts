@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyRepro } from './bundle.ts';
-import { RN_VERSION, resolveHdiffz, resolveHermesc, resolveOtaApply, type HermescInfo } from './tools.ts';
+import { RN_VERSION, hermescSupportsBaseBytecode, resolveHdiffz, resolveHermesc, resolveOtaApply, type HermescInfo } from './tools.ts';
 import { HERMESC_PIN_TABLE, PIN_KEYS, pinKeyForHost } from './pins.ts';
 import { childEnv, describeOrigin, hashFile, rmrf, run, toolsDir, workDir } from './util.ts';
 import type { Platform } from './types.ts';
@@ -17,7 +17,7 @@ import { describeMetro } from '../../unit-splitter/src/metro-compat.js';
 
 export type Status = 'PASS' | 'WARN' | 'FAIL' | 'MANUAL';
 export interface Check { id: string; title: string; status: Status; detail: string; remedy?: string }
-export interface DoctorOptions { project: string; platform?: Platform; deep?: boolean }
+export interface DoctorOptions { project: string; platform?: Platform; deep?: boolean; /** `off` = delta compile not needed (default auto: patch builds use it) */ delta?: 'auto' | 'on' | 'off' }
 export interface DoctorReport { project: string; platform: Platform | 'both'; checks: Check[]; ok: boolean }
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -207,6 +207,16 @@ export async function runDoctor(o: DoctorOptions): Promise<DoctorReport> {
     else if (projSha && projSha !== pinned.sha256) add('hermesc', 'pinned hermesc matches the project\'s React Native', 'FAIL', `${facts}: DIFFERENT binaries, bytecode may differ from what the app ships`, `the app was built with another RN: update RN_VERSION and the pin table in src/pins.ts to the project's hermesc and re-run fetch-tools (an OTA bytecode must match the embedded Hermes exactly)`);
     else if (!projSha) add('hermesc', 'pinned hermesc matches the project\'s React Native', 'WARN', `${facts}: cannot compare`, 'install react-native in the project to cross-check, or confirm manually that the shipped app uses this hermesc build');
     else add('hermesc', 'pinned hermesc matches the project\'s React Native', 'PASS', `${facts}: identical`);
+  }
+
+  // 9b. hermesc delta mode (-base-bytecode): patch builds compile against the embedded base, ~30x smaller host patches
+  {
+    const title = 'hermesc supports -base-bytecode (delta compile)';
+    const mode = o.delta ?? 'auto';
+    if (!pinned) add('hermesc-delta', title, 'WARN', 'cannot check: no usable hermesc (see the hermesc check)', 'fix the hermesc check first');
+    else if (hermescSupportsBaseBytecode(pinned.path)) add('hermesc-delta', title, 'PASS', `${pinned.path}: \`hermesc -help\` lists -base-bytecode`);
+    else if (mode === 'off') add('hermesc-delta', title, 'WARN', `${pinned.path} has no -base-bytecode; --delta off, patches are built plain (host patches ~30x larger)`, 'use the pinned RN hermesc (fetch-tools) to enable delta compile');
+    else add('hermesc-delta', title, 'FAIL', `${pinned.path}: \`hermesc -help\` does not list -base-bytecode, but patch builds use delta compile (--delta ${mode})`, `use the pinned RN ${RN_VERSION} hermesc (run: node packages/ota-build/src/cli.ts fetch-tools --force; do not point OTA_HERMESC at an older/stripped build) or run patch builds with --delta off (patches get ~30x larger for string edits)`);
   }
 
   // 10. native tools + tools/work dirs, with where each location came from

@@ -11,13 +11,13 @@ import { baseJSBundle, bundleToString, getAppendScripts as appendScripts, wrapMo
  */
 export function makeSplitSerializer({ projectRoot, units, base, sink, approach = 'serializer', checks }) {
   return async (entryPoint, preModules, graph, options) => {
-    const { owner, violations, warnings, newPackages, cycles, checks: checksSummary, publicApi } = analyze(graph, preModules, { projectRoot, units, base, checks });
+    const { owner, violations, warnings, newPackages, cycles, checks: checksSummary, publicApi, assets, nativeRefs } = analyze(graph, preModules, { projectRoot, units, base, checks });
     if (violations.length) throw new VerificationError(violations, warnings);
 
     const { createModuleId } = options;
     for (const m of graph.dependencies.values()) createModuleId(m.path); // register ids (collision check)
     for (const m of preModules) createModuleId(m.path);
-    sink.analysis = { owner, newPackages, graph, preModules, warnings, cycles, checks: checksSummary, publicApi };
+    sink.analysis = { owner, newPackages, graph, preModules, warnings, cycles, checks: checksSummary, publicApi, assets, nativeRefs };
 
     if (approach === 'postprocess') {
       // (c): stock single-file bundle; split happens later from the id->path map.

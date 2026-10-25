@@ -43,6 +43,30 @@ the CLI prints warnings and a one-line summary per check. All keys are optional:
 | `dynamicRequire` | `error`\|`warn`\|`off` (`error`) | `dynamic-require` | Non-literal `require(x)` / `import(x)` and `require.context(...)` in first-party host code, unit code and packages bundled into a unit. Third-party host packages are only counted (`checks['dynamic-require'].thirdPartyModules`). See "Dynamic references" below. |
 | `requireRegisterComponent` | boolean (`false`) | `register-component` | Each unit entry file must call `AppRegistry.registerComponent('<unitName>', ...)` with a literal name equal to the unit name. On in `examples/spike-app`. |
 
+| `assets` | `error`\|`warn`\|`off` (`error`) | `asset-not-in-base`, `asset-path-changed` | Patch builds only. See "Asset rule" below. |
+| `nativeModules` | `error`\|`warn`\|`off` (`error`) | `native-module-new`; warn-only `native-method-new`, `native-module-dynamic`, `native-refs-base-missing` | Patch builds only. See "Native-module scan" below. |
+
+### Asset rule (Tier 1, patch builds; `src/assets.js`)
+
+The bytes of an image (or a font that goes through Metro's asset pipeline) are in no JS bundle: they are in the binary (Android `res/drawable-*`, iOS bundle). A patch can only reference assets whose bytes already shipped. Every build records, per owner, in `units.json` `assets[]`: `path`, `sha256` of the file, the registered `name`/`type`/`httpServerLocation`/`scales`, the derived `androidResource` (e.g. `src_units_bus_assets_busicon`: lower-cased, `/` -> `_`, everything else but `[a-z0-9_]` dropped, same as RN's bundling step) and `iosPath`, and `variants[]` (`{scale, path, sha256}` for every `@2x`/`@3x`/platform file found next to it). With `--base`, each asset owned by a unit (or by a new package claimed into it) is looked up in the base's assets (host and units):
+
+* same path, other sha256 or other variant set -> `asset-not-in-base` ("changed"); path absent in the base and bytes unknown -> `asset-not-in-base` ("new");
+* same bytes at another path (moved/renamed), or same path but another registered location/name -> `asset-path-changed` (the native resource name derives from the path, so the patch would point at a resource that does not exist);
+* an asset that disappeared is fine. Host assets are not compared (host changes are not shipped in a patch). A base build is never checked, only recorded.
+
+Fix: keep the asset unchanged, ship it in a binary release, or use a remote / data-URI image. Tests: `test/assets-native.test.js` (new, edited, `@2x` added, moved, warn/off) and `test/spike-app.test.js` (real RN graph, unchanged patch passes).
+
+### Native-module scan (Tier 1 rule 5, v1; `src/native-refs.js`)
+
+A patch must not call a native module the binary lacks. v1 needs no native-side introspection: the inventory is derived from the BASE build's JS (everything the base JS references must exist in the binary, because the base works). In EVERY build, all script modules of the graph (units, first-party host, node_modules) that mention a native-lookup identifier are parsed with Babel (cached per content hash within the run) and the references are recorded in `units.json` `nativeRefs: {<Name>: {owners, methods, kinds}}`:
+
+* `NativeModules.X`, `NativeModules['X']`, `const {X} = NativeModules` (kind `module`); `TurboModuleRegistry.get('X')` / `getEnforcing('X')` (`turbo`); `requireNativeComponent('X')`, `codegenNativeComponent('X')`, `NativeComponentRegistry.get('X')`, `UIManager.getViewManagerConfig('X')` (`view`). `new NativeEventEmitter(NativeModules.X)` is covered by the first form.
+* `methods` = members accessed directly: `NativeModules.X.m`, `getEnforcing('X').m`, or through a same-file alias (`const X = NativeModules.X; X.m`, destructured names).
+
+With `--base`, for the modules owned by units (incl. claimed new packages): a literal name absent from the base's `nativeRefs` -> `native-module-new` (error, or warning with `checks.nativeModules: "warn"`); a direct method the base never accessed on that module -> warning `native-method-new`; a non-literal name -> warning `native-module-dynamic`. A base without `nativeRefs` -> one warning `native-refs-base-missing`, no checks. Host modules are never checked in a patch (not shipped).
+
+Limits (deliberate): (1) conservative in one direction only: it can reject modules the base JS never referenced, it cannot know the binary's real module list, so a native module that exists in the binary but is unused by the base JS cannot be adopted OTA (relax: add a reference to it in the base/train build, e.g. a host-side `TurboModuleRegistry.get('X')`); (2) indirect uses are invisible (a module obtained in one file and used in another, codegen wrapper specs, `NativeModules[name]`), so `native-method-new` is only a warning and a name found through a non-literal lookup cannot be verified; (3) the match is by identifier name, not by import binding (`NativeModules` re-exported under another name is missed); (4) module and view names share one namespace; (5) per platform: compare android builds with an android base. Cost: ~0.3 s on examples/spike-app (~4.2 s -> ~4.5 s per build, 500 modules).
+
 ### Two-package LoB layout: host API checks (examples/two-package-app, tests: `test/two-package.test.js`)
 
 A LoB ships a PUBLIC package (HOST-owned: in the binary, patched only by host lane/train, must stay very stable; e.g. `@travelplex/core`: init, fetch-config

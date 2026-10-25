@@ -68,6 +68,8 @@ All keys optional; unknown keys throw (`parseChecks`). Defaults (`DEFAULT_CHECKS
 | `dynamicRequire` | `error`/`warn`/`off` | `error` | `dynamic-require` (Metro's own first-party rejection cannot be downgraded) |
 | `requireRegisterComponent` | boolean | `false` | `register-component` |
 | `hostExports` | `error`/`warn`/`off` | `error` | `host-export-missing`, `host-export-unknown` |
+| `assets` | `error`/`warn`/`off` | `error` | `asset-not-in-base`, `asset-path-changed` (patch builds only) |
+| `nativeModules` | `error`/`warn`/`off` | `error` | `native-module-new` (error/warn per key), `native-method-new`, `native-module-dynamic`, `native-refs-base-missing` (always warnings; patch builds only) |
 | `publicPackages` | string[] | `[]` | `public-deep-import`, `public-package-not-host`, `public-package-missing`, and the snapshot rules |
 | `publicApiSnapshot` | `{ "<pkg>": "<path>" }` | `{}` | `public-api-*`. Every key must also be in `publicPackages`. |
 | `publicApiStrict` | boolean | `false` | makes `public-api-changed` an error |

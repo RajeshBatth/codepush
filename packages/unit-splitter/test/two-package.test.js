@@ -118,6 +118,8 @@ test('a unit patch (UI string in @travelplex/ui) changes ONLY the travelplex uni
   const r = await build({ projectRoot: p, outDir: o, base: b.outDir });
   assert.deepEqual(diffAgainstBase(b.outDir, o), { changedUnits: ['travelplex'], hostChanged: false, addedUnits: [], removedUnits: [] });
   assert.deepEqual(r.warnings, []);
+  assert.equal(r.checks['native-modules'].count, 0);
+  assert.equal(r.checks.assets.count, 0);
   const rt = createRuntime({ distDir: b.outDir, patchDir: o });
   assert.match(await rt.openUnit('travelplex', {}), /HOME v2/);
   assert.deepEqual(Array.from(rt.ctx.__tlxLog), ['init:start', 'ws:open', 'config:fetch']);

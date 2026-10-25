@@ -16,7 +16,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * S1-S10 per SPIKE.md. Runs on a background thread; UI work is marshalled to the main thread.
+ * S1-S18 per SPIKE.md (S11-S15: delta-built bytecode + on-device otacore applyPatch; S16-S17: unit adds a function + strings on the embedded host; S18: realistic unit size). Runs on a background thread; UI work is marshalled to the main thread.
  * Execution order (state dependent): S1 S3 S6 S4 S5 S7 S8 S9 S2 S10. Each VM-recreating test first removes all surfaces.
  */
 class SpikeTests(private val activity: Activity, private val box: FrameLayout, private val sink: (String) -> Unit) {
@@ -134,6 +134,14 @@ class SpikeTests(private val activity: Activity, private val box: FrameLayout, p
     guarded("S9", ::s9)
     guarded("S2", ::s2)
     guarded("S10", ::s10)
+    guarded("S11", ::s11)
+    guarded("S12", ::s12)
+    guarded("S13", ::s13)
+    guarded("S14", ::s14)
+    guarded("S15", ::s15)
+    guarded("S16", ::s16)
+    guarded("S17", ::s17)
+    guarded("S18", ::s18)
     unmount()
     val line = "OTA_SPIKE SUMMARY pass=$pass fail=$fail"
     Log.i("OTA_SPIKE", line)
@@ -261,7 +269,8 @@ class SpikeTests(private val activity: Activity, private val box: FrameLayout, p
     mount("SpikeHost")
     val t = waitText("HOST:patched")
     val host = probe("__otaProbe.host")
-    log("S2", t != null && host == "\"patched\"", "surface=${t?.text} probe.host=$host source=${SpikeHost.source} (via ReactHost.reload with dynamic JSBundleLoader)")
+    val fn = probe("__otaProbe.hostFn")
+    log("S2", t != null && host == "\"patched\"" && fn == "\"${Ota.expectedHostFn()}\"" && Ota.deltaBuilt(), "surface=${t?.text} probe.host=$host hostFn=$fn deltaBuilt=${Ota.deltaBuilt()} source=${SpikeHost.source} (via ReactHost.reload with dynamic JSBundleLoader)")
   }
 
   private fun s10() {
@@ -279,5 +288,224 @@ class SpikeTests(private val activity: Activity, private val box: FrameLayout, p
     val t = waitText("CABS:v1")
     log("S10", a.ok && va == "\"v1\"" && host == "\"patched\"" && units == "{}" && b.ok && vb == "\"v1\"" && t != null,
         "before: cabs=$va | after swap: host=$host units=$units | reload cabs: ${b.status} probe=$vb surface=${t?.text}")
+  }
+
+  // ================= S11-S15 =================
+  private fun sha(rel: String) = OtaNative.nativeSha256File(Ota.path(rel))
+
+  /** S11: patched (delta-built) cabs v2 is the FIRST definition of cabs in a fresh VM (embedded cabs never loaded). */
+  private fun s11() {
+    boot(SpikeHost.Src.Embedded, "S11")
+    val before = probe("__otaProbe.units")
+    val fileHash = sha("patched/units/cabs.hbc")
+    val embHash = sha("embedded/units/cabs.hbc")
+    val o = evalUnit("patched/units/cabs.hbc", Ota.patchedCabsEntryId(), "unit://cabs-v2", Ota.patchedHash("cabs"))
+    val v = probe("__otaProbe.units.cabs")
+    mount("cabs")
+    val t = waitText("CABS:v2")
+    val sane = fileHash == Ota.patchedHash("cabs") && fileHash != embHash
+    log("S11", before == "{}" && o.ok && v == "\"v2\"" && t != null && sane && Ota.deltaBuilt(),
+        "fresh VM units-before=$before eval(delta-built v2)=${o.status} probe.units.cabs=$v surface=${t?.text} deltaBuilt=${Ota.deltaBuilt()} " +
+            "file=${fileHash.take(19)} (embedded=${embHash.take(19)}) hashMatchesSpikeJson=${fileHash == Ota.patchedHash("cabs")}")
+  }
+
+  /** S12: delta-built patched host boots; its NEW function runs (probe.hostFn); then the delta-built cabs v2 loads on top of it. */
+  private fun s12() {
+    boot(SpikeHost.Src.Embedded, "S12-a")
+    val embFn = probe("typeof __otaProbe.hostFn")
+    val hostHash = sha("patched/host.hbc")
+    boot(patchedHost, "S12-b")
+    mount("SpikeHost")
+    val t = waitText("HOST:patched")
+    val host = probe("__otaProbe.host")
+    val fn = probe("__otaProbe.hostFn")
+    val o = evalUnit("patched/units/cabs.hbc", Ota.patchedCabsEntryId(), "unit://cabs-v2-on-patched-host", Ota.patchedHash("cabs"))
+    val v = probe("__otaProbe.units.cabs")
+    mount("cabs")
+    val t2 = waitText("CABS:v2")
+    val expectedFn = "\"${Ota.expectedHostFn()}\""
+    log("S12", embFn == "\"undefined\"" && t != null && host == "\"patched\"" && fn == expectedFn && o.ok && v == "\"v2\"" && t2 != null &&
+        hostHash == Ota.patchedHash("host") && Ota.deltaBuilt(),
+        "embedded host typeof hostFn=$embFn | patched host (delta-built, ${hostHash.take(19)}) surface=${t?.text} probe.host=$host hostFn=$fn (expected $expectedFn) | " +
+            "then cabs v2: ${o.status} probe.units.cabs=$v surface=${t2?.text}")
+  }
+
+  private fun builtPath(rel: String) = "built/$rel"
+
+  /** S13: applyPatch(embedded, .hdiff) on device == the delta-built file (sha256), then the BUILT files load and run. */
+  private fun s13() {
+    val sb = StringBuilder()
+    var ok = true
+    val results = HashMap<String, OtaNative.ApplyOutcome>()
+    for ((key, emb) in listOf("cabs" to "embedded/units/cabs.hbc", "host" to "embedded/host.hbc")) {
+      val p = Ota.patch(key)
+      val out = Ota.path(if (key == "host") builtPath("host.hbc") else builtPath("units/cabs.hbc"))
+      File(out).parentFile!!.mkdirs()
+      val r = OtaNative.applyPatch(Ota.path(emb), Ota.path(p.patchFile), out, p.builtHash)
+      val got = if (File(out).exists()) OtaNative.nativeSha256File(out) else "none"
+      val eq = got == p.builtHash && got == Ota.patchedHash(key)
+      ok = ok && r.ok && eq && r.outExists && !r.tmpExists
+      results[key] = r
+      sb.append("$key{patch=${File(Ota.path(p.patchFile)).length()}B base=${File(Ota.path(emb)).length()}B built=${File(out).length()}B $r sha256(out)=${got.take(19)} ==expected&delta-built:$eq} ")
+    }
+    // the BUILT cabs runs: fresh VM, first definition of cabs
+    boot(SpikeHost.Src.Embedded, "S13-cabs")
+    val builtCabs = Ota.path(builtPath("units/cabs.hbc"))
+    val o = OtaNative.evaluateBlocking(SpikeHost.context()!!, builtCabs, Ota.patchedCabsEntryId(), "unit://cabs-built-on-device", Ota.hbcVersion, Ota.patchedHash("cabs"))
+    val v = probe("__otaProbe.units.cabs")
+    mount("cabs")
+    val t = waitText("CABS:v2")
+    // the BUILT host boots too
+    boot(SpikeHost.Src.File(Ota.path(builtPath("host.hbc"))), "S13-host")
+    mount("SpikeHost")
+    val th = waitText("HOST:patched")
+    val fn = probe("__otaProbe.hostFn")
+    ok = ok && o.ok && v == "\"v2\"" && t != null && th != null && fn == "\"${Ota.expectedHostFn()}\""
+    log("S13", ok, "$sb | built cabs: ${o.status} probe=$v surface=${t?.text} | built host: surface=${th?.text} hostFn=$fn")
+  }
+
+  private fun corruptCopies(): List<Triple<String, File, String>> {
+    val dir = File(Ota.root, "bad").apply { mkdirs() }
+    val res = ArrayList<Triple<String, File, String>>()
+    for (key in listOf("cabs", "host")) {
+      val src = File(Ota.path(Ota.patch(key).patchFile)).readBytes()
+      val flipped = src.copyOf().also { it[it.size / 2] = (it[it.size / 2].toInt() xor 0xFF).toByte() }
+      val trunc = src.copyOf(src.size / 2)
+      res += Triple("$key-flip", File(dir, "$key-flip.hdiff").also { it.writeBytes(flipped) }, key)
+      res += Triple("$key-trunc", File(dir, "$key-trunc.hdiff").also { it.writeBytes(trunc) }, key)
+    }
+    return res
+  }
+
+  /** S14: corrupt/truncated patches are rejected on device and leave no output (and do not touch a pre-existing file). */
+  private fun s14() {
+    val sb = StringBuilder()
+    var ok = true
+    for ((name, patch, key) in corruptCopies()) {
+      val p = Ota.patch(key)
+      val emb = if (key == "host") "embedded/host.hbc" else "embedded/units/cabs.hbc"
+      val out = File(Ota.root, "bad/$name.out")
+      val sentinel = name.endsWith("trunc")
+      if (sentinel) out.writeText("sentinel")
+      val r = OtaNative.applyPatch(Ota.path(emb), patch.absolutePath, out.absolutePath, p.builtHash)
+      val rejected = r.status == "PatchCorrupt" || r.status == "HashMismatch"
+      val clean = if (sentinel) out.exists() && out.readText() == "sentinel" && !r.tmpExists else !out.exists() && !r.tmpExists
+      ok = ok && rejected && clean
+      sb.append("$name->${r.status}(${"%.1f".format(r.ms)}ms,${if (sentinel) "preexisting-untouched" else "no-output"}=$clean) ")
+    }
+    log("S14", ok, sb.toString().trim())
+  }
+
+  /** S15: right patch, wrong expected hash -> HashMismatch and no output. */
+  private fun s15() {
+    val sb = StringBuilder()
+    var ok = true
+    for ((key, emb) in listOf("cabs" to "embedded/units/cabs.hbc", "host" to "embedded/host.hbc")) {
+      val p = Ota.patch(key)
+      val wrong = p.builtHash.dropLast(1) + (if (p.builtHash.last() == '0') '1' else '0')
+      val out = File(Ota.root, "bad/$key-wronghash.out")
+      val r = OtaNative.applyPatch(Ota.path(emb), Ota.path(p.patchFile), out.absolutePath, wrong)
+      val good = r.status == "HashMismatch" && !out.exists() && !r.tmpExists
+      ok = ok && good
+      sb.append("$key->${r.status} out=${out.exists()} tmp=${r.tmpExists} ")
+    }
+    log("S15", ok, sb.toString().trim())
+  }
+
+  // ================= S16-S18: unit-only edits never need a host patch =================
+  private fun v3Properties(tag: String, unitFile: String, via: String): Pair<Boolean, String> {
+    val hostBefore = sha("embedded/host.hbc")
+    boot(SpikeHost.Src.Embedded, tag)
+    val before = probe("__otaProbe.units")
+    val hostProbe = probe("__otaProbe.host")
+    val hostFnType = probe("typeof __otaProbe.hostFn")
+    val o = evalUnit(unitFile, Ota.v3EntryId(), "unit://cabs-v3-$tag", Ota.v3Hash())
+    val v = probe("__otaProbe.units.cabs")
+    val fn = probe("__otaProbe.unitFn")
+    mount("cabs")
+    val t = waitText("CABS:v3")
+    val changedStr = waitText("Mini fare:", 4000) // the changed existing string (was "Mini 120")
+    val hostAfter = sha("embedded/host.hbc")
+    val expectedFn = "\"${Ota.v3UnitFn()}\""
+    val ok = hostBefore == Ota.embeddedHostHash() && hostAfter == hostBefore && hostBefore == Ota.v3HostHash() && !Ota.v3HostChanged() &&
+        before == "{}" && hostProbe == "\"embedded\"" && hostFnType == "\"undefined\"" && o.ok && v == "\"v3\"" && fn == expectedFn &&
+        t != null && changedStr != null && Ota.v3DeltaBuilt() && sha(unitFile) == Ota.v3Hash()
+    return ok to "$via fresh VM on EMBEDDED host (host sha256 ${hostBefore.take(19)} == embedded ${Ota.embeddedHostHash().take(19)} == v3-build host ${Ota.v3HostHash().take(19)}, " +
+        "unchanged after=${hostAfter == hostBefore}, hostChanged(spike.json)=${Ota.v3HostChanged()}) units-before=$before probe.host=$hostProbe eval=${o.status} bytes=${o.bytes} " +
+        "probe.units.cabs=$v unitFn=$fn (expected $expectedFn) surface=${t?.text} changed-string-row=${changedStr?.text} deltaBuilt=${Ota.v3DeltaBuilt()} " +
+        "eval map=%.2f check+sha=%.2f eval=%.2f require=%.2f ms".format(o.mapMs, o.checkMs, o.evalMs, o.requireMs)
+  }
+
+  /** S16: the delta-built v3 unit (new function + new strings + changed string + new module) is the FIRST cabs definition on the untouched EMBEDDED host. */
+  private fun s16() {
+    val (ok, d) = v3Properties("S16", "patched/units/cabs-v3.hbc", "delta-built file")
+    log("S16", ok, d)
+  }
+
+  /** S17: v3 through the on-device apply: otacore applyPatch(embedded cabs, cabs-v3.hdiff) == the delta-built file; load the BUILT file. */
+  private fun s17() {
+    val p = Ota.patch("cabs-v3")
+    val out = Ota.path(builtPath("units/cabs-v3.hbc"))
+    File(out).parentFile!!.mkdirs()
+    val r = OtaNative.applyPatch(Ota.path("embedded/units/cabs.hbc"), Ota.path(p.patchFile), out, p.builtHash)
+    val got = if (File(out).exists()) OtaNative.nativeSha256File(out) else "none"
+    val eq = got == p.builtHash && got == Ota.v3Hash()
+    val (ok, d) = v3Properties("S17", builtPath("units/cabs-v3.hbc"), "on-device BUILT file")
+    log("S17", r.ok && eq && r.outExists && !r.tmpExists && p.baseHash == sha("embedded/units/cabs.hbc") && ok,
+        "apply: patch=${File(Ota.path(p.patchFile)).length()}B (plain-built patch would be ${p.plainPatchSize}B) base=${File(Ota.path("embedded/units/cabs.hbc")).length()}B built=${File(out).length()}B $r " +
+            "sha256(out)=${got.take(19)} ==expected&delta-built:$eq | $d")
+  }
+
+  private fun median(l: List<Double>) = l.sorted()[l.size / 2]
+
+  /** S18: realistic unit size (~240 KB biglib: lodash + dayjs + semver + ajv through the real splitter/ota-build pipeline). */
+  private fun s18() {
+    val b = Ota.big()
+    if (b == null) {
+      log("S18", false, "spike.json has no `big` record (run scripts/prepare-spike-big.mjs and rebuild)")
+      return
+    }
+    val sb = StringBuilder()
+    var ok = sha(b.baseFile) == b.baseHash
+    val runs = ArrayList<EvalOutcome>()
+    val totals = ArrayList<Double>()
+    val shaMs = ArrayList<Double>()
+    for (i in 0 until 5) { // run 0 = cold (first in this process for this file), 1..4 = warm
+      boot(SpikeHost.Src.Embedded, "S18-b1-$i")
+      val t0 = SystemClock.elapsedRealtimeNanos()
+      val o = evalUnit(b.baseFile, b.entryId, "unit://biglib-b1", b.baseHash)
+      totals += (SystemClock.elapsedRealtimeNanos() - t0) / 1e6
+      val v = probe("__otaProbe.units.biglib")
+      ok = ok && o.ok && v == "\"${b.b1}\""
+      runs += o
+      if (i == 0) sb.append("probe=$v units=${probe("__otaProbe.units")} first-eval=$o ")
+    }
+    fun fmt(o: EvalOutcome, tot: Double) = "map=%.2f check+sha256=%.2f eval=%.2f require=%.2f total=%.2f ms".format(o.mapMs, o.checkMs, o.evalMs, o.requireMs, tot)
+    val warm = runs.drop(1); val warmTot = totals.drop(1)
+    sb.append("unit=${b.size}B | cold: ${fmt(runs[0], totals[0])} | warm(median of 4): map=%.2f check+sha256=%.2f eval=%.2f require=%.2f total=%.2f ms | "
+        .format(median(warm.map { it.mapMs }), median(warm.map { it.checkMs }), median(warm.map { it.evalMs }), median(warm.map { it.requireMs }), median(warmTot)))
+    // on-device apply of the one-string-edit delta patch, 3 runs (first = cold)
+    val out = Ota.path(builtPath("units/biglib-b2.hbc"))
+    File(out).parentFile!!.mkdirs()
+    val applies = ArrayList<OtaNative.ApplyOutcome>()
+    for (i in 0 until 3) {
+      File(out).delete()
+      val r = OtaNative.applyPatch(Ota.path(b.baseFile), Ota.path(b.patchFile), out, b.builtHash)
+      applies += r
+      ok = ok && r.ok && r.outExists && !r.tmpExists
+    }
+    val got = OtaNative.nativeSha256File(out)
+    val eq = got == b.builtHash
+    ok = ok && eq
+    sb.append("apply(one-string edit, patch=${b.patchSize}B delta-built vs ${b.plainPatchSize}B plain-built, built=${File(out).length()}B): " +
+        "first ${applies[0]} | later ms=${applies.drop(1).joinToString { "%.2f".format(it.ms) }} peak+${applies.drop(1).joinToString { "${it.peakDeltaKb}kB" }} sha256(out)==expected:$eq | ")
+    boot(SpikeHost.Src.Embedded, "S18-b2")
+    val o = evalUnit(builtPath("units/biglib-b2.hbc"), b.entryId, "unit://biglib-b2", b.builtHash)
+    val v = probe("__otaProbe.units.biglib")
+    mount("biglib")
+    val t = waitText("BIGLIB:b2")
+    ok = ok && o.ok && v == "\"${b.b2}\"" && t != null
+    sb.append("built b2: ${o.status} probe=$v surface=${t?.text}")
+    log("S18", ok, sb.toString())
   }
 }

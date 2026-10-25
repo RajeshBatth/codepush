@@ -228,6 +228,40 @@ SCENARIO(recreate_waits_for_inflight_load) {
   CHECK_EQ(w.log.count("vm.destroyVm"), 1);
 }
 
+// A poisoned VM must not be retried before it is replaced, even with the per-process freeze on: a failed pin may re-decide
+// only in a CLEAN VM (the patch's modules are registered and Metro would not let embedded override them).
+SCENARIO(poisoned_vm_is_not_retried_before_it_is_replaced) {
+  Env env("poisoned_retry");
+  Patch p = env.makePatch("cabs", "cabs-pr1", withEdits(env.units["cabs"], 11));
+  ManifestSpec m; m.units["cabs"] = {entry(p)};
+  publish(env, m);
+  auto st = std::make_shared<MemStore>();
+  seedCachedManifest(env, *st, m);
+  Config cfg = baseConfig(env);
+  cfg.unitPolicy["cabs"].pin = Pin::Process;
+  World w(env, cfg, st);
+  w.failEntryContains = {"cabs-pr1"};
+  w.boot(1500);
+  auto other = w.open("bus");  // a mounted surface keeps the poisoned VM from being replaced yet
+  w.advance(10);
+  CHECK(other->r.ok);
+  auto r = w.open("cabs");
+  w.advance(10);
+  CHECK(r->calls == 1 && !r->r.ok);
+  const size_t evals = w.evaluated.size();
+  auto r2 = w.open("cabs");
+  w.advance(10);
+  CHECK(r2->calls == 1 && !r2->r.ok);   // fails fast: the VM is still poisoned
+  CHECK_EQ(w.evaluated.size(), evals);  // and nothing was evaluated into it
+  CHECK_EQ(w.log.count("vm.destroyVm"), 0);
+  w.unmountAll();
+  w.advance(500);
+  CHECK_EQ(w.log.count("vm.destroyVm"), 1);  // replaced at the zero-views moment
+  auto r3 = w.open("cabs");
+  w.advance(500);
+  CHECK(r3->r.ok && r3->r.source == "embedded");  // a clean VM re-decides: patch blacklisted, embedded loads
+}
+
 // Entry module missing after a patch evaluated: the VM is poisoned, the patch blacklisted, VM replaced at zero views.
 SCENARIO(entry_failure_poisons_vm) {
   Env env("entry_failure");

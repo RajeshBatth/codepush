@@ -10,6 +10,8 @@
 #include <ReactCommon/CallInvokerHolder.h>
 
 #include <chrono>
+#include <cstring>
+#include <sys/stat.h>
 #include <cstdio>
 #include <memory>
 #include <sstream>
@@ -241,3 +243,46 @@ JNIEXPORT void JNICALL Java_com_otaspike_OtaNative_nativeProbe(JNIEnv* env, jcla
 }
 
 }  // extern "C"
+
+// ---------------------------------------------------------------- S13-S15: otacore applyPatch on device
+static long procKb(const char* key) {  // /proc/self/status "VmRSS:" / "VmHWM:" in kB
+  FILE* f = fopen("/proc/self/status", "r");
+  if (!f) return -1;
+  char line[256];
+  long v = -1;
+  size_t kl = strlen(key);
+  while (fgets(line, sizeof line, f)) {
+    if (strncmp(line, key, kl) == 0) { v = atol(line + kl); break; }
+  }
+  fclose(f);
+  return v;
+}
+
+// returns "<Status>|<ms>|<rssBeforeKb>|<hwmAfterKb>|<rssAfterKb>|<outExists 0/1>|<tmpExists 0/1>|<clearRefsOk 0/1>"
+extern "C" JNIEXPORT jstring JNICALL Java_com_otaspike_OtaNative_nativeApplyPatch(JNIEnv* env, jclass, jstring jold, jstring jpatch,
+                                                                                   jstring jout, jstring jhash) {
+  std::string oldF = str(env, jold), patchF = str(env, jpatch), outF = str(env, jout), hash = str(env, jhash);
+  // reset the kernel's peak-RSS watermark (VmHWM) so hwmAfter reflects only this apply
+  int cr = 0;
+  if (FILE* f = fopen("/proc/self/clear_refs", "w")) { cr = fputs("5", f) >= 0; if (fclose(f) != 0) cr = 0; }
+  long rssBefore = procKb("VmRSS:");
+  auto t0 = clk::now();
+  otacore::Status st;
+  {
+    otacore::FileSource old(oldF);
+    st = old.ok() ? otacore::applyPatch(old, patchF, outF, hash) : otacore::Status::IoError;
+  }
+  double ms = msSince(t0);
+  long hwm = procKb("VmHWM:"), rssAfter = procKb("VmRSS:");
+  struct stat sb;
+  int outEx = stat(outF.c_str(), &sb) == 0, tmpEx = stat((outF + ".tmp").c_str(), &sb) == 0;
+  char buf[256];
+  snprintf(buf, sizeof buf, "%s|%.3f|%ld|%ld|%ld|%d|%d|%d", otacore::statusName(st), ms, rssBefore, hwm, rssAfter, outEx, tmpEx, cr);
+  return env->NewStringUTF(buf);
+}
+
+extern "C" JNIEXPORT jstring JNICALL Java_com_otaspike_OtaNative_nativeSha256File(JNIEnv* env, jclass, jstring jpath) {
+  std::string h;
+  if (!otacore::sha256File(str(env, jpath), h)) h = "IOERROR";
+  return env->NewStringUTF(h.c_str());
+}

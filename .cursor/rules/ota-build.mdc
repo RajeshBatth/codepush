@@ -3,7 +3,7 @@ description: Rules for the bundle/patch pipeline (packages/ota-build)
 globs: packages/ota-build/**
 alwaysApply: false
 ---
-- hermesc recipe is fixed: `cd <workdir> && hermesc -O -emit-binary -g0 -out unit.hbc <fixed-relative-name>.js`. The compiler is **pinned by RN version + sha256** in `src/pins.ts` (osx/linux64/win64). Never run a non-pinned binary unless `--allow-unpinned` is explicit.
+- hermesc recipe is fixed: `cd <workdir> && hermesc -O -emit-binary -g0 [-base-bytecode=<embedded base>.hbc] -out unit.hbc <fixed-relative-name>.js`. The optional `-base-bytecode` (delta mode, `--delta auto|on|off`) is used for PATCH builds only (when `--base-build` is given); the delta base is ALWAYS the embedded base bundle, never a previous patch (`DELTA_BASE_IS_DELTA`); the base .hbc is copied to a fixed name `base.hbc` in the work dir; unchanged files (same JS sha256 as the base's) are copied from the base .hbc; `--delta on` never falls back to plain; the base build's .hbc bytes must be archived (`archive-base`). The compiler is **pinned by RN version + sha256** in `src/pins.ts` (osx/linux64/win64). Never run a non-pinned binary unless `--allow-unpinned` is explicit.
 - `patch` must **round-trip**: apply the produced diff with `ota_apply` (the same C++ code the app ships) and require the result's sha256 to equal the new bundle's. Never emit an unverified patch.
 - `full` updates are a diff against an **empty** old file (same apply code path).
 - Tool and work locations resolve: flag > env (`OTA_TOOLS_DIR`, `OTA_WORK_DIR`, `OTA_HERMESC`, `OTA_HDIFFZ`, `OTA_APPLY`) > repo-relative default. Do not hard-code repo-relative paths in new code.

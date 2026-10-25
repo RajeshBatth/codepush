@@ -71,7 +71,29 @@ object OtaNative {
       cb: EvalCallback
   )
 
+  /** otacore::applyPatch via FileSource. Returns "<Status>|ms|rssBeforeKb|hwmAfterKb|rssAfterKb|outExists|tmpExists|clearRefsOk". */
+  @JvmStatic external fun nativeApplyPatch(oldFile: String, patchFile: String, outFile: String, expectedHash: String): String
+
+  @JvmStatic external fun nativeSha256File(path: String): String
+
   @JvmStatic external fun nativeProbe(holder: Any?, expr: String, cb: ProbeCallback)
+
+  data class ApplyOutcome(
+      val status: String, val ms: Double, val rssBeforeKb: Long, val hwmAfterKb: Long, val rssAfterKb: Long,
+      val outExists: Boolean, val tmpExists: Boolean, val peakReset: Boolean
+  ) {
+    val ok get() = status == "Ok"
+    /** peak RSS above the pre-apply RSS (VmHWM was reset just before when peakReset) */
+    val peakDeltaKb get() = hwmAfterKb - rssBeforeKb
+    override fun toString() =
+        "status=$status time=%.2fms rss=%dkB peak=%dkB (+%dkB%s) rssAfter=%dkB out=%s tmp=%s"
+            .format(ms, rssBeforeKb, hwmAfterKb, peakDeltaKb, if (peakReset) "" else ", HWM NOT reset", rssAfterKb, outExists, tmpExists)
+  }
+
+  fun applyPatch(oldFile: String, patchFile: String, outFile: String, expectedHash: String): ApplyOutcome {
+    val p = nativeApplyPatch(oldFile, patchFile, outFile, expectedHash).split("|")
+    return ApplyOutcome(p[0], p[1].toDouble(), p[2].toLong(), p[3].toLong(), p[4].toLong(), p[5] == "1", p[6] == "1", p[7] == "1")
+  }
 
   fun mapAndCheck(path: String, expectedVersion: Int, expectedHash: String = "", misalign: Int = 0): MapOutcome {
     val p = nativeMapAndCheck(path, expectedVersion, expectedHash, misalign).split("|")

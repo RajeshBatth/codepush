@@ -5,7 +5,7 @@
   "description": "<patch out dir>/patch-report.json written by `ota-build patch` (packages/ota-build/src/patch.ts, interface PatchReport) next to the *.hdiff patch files, after a mandatory round trip through the shipped C++ apply. Consumed by `ota-build deploy-args`, which turns two reports (android + ios) into `ota-cli deploy` flags. NOT expressible: hostChanged/changedUnits/items consistency (hostChanged iff an item has unit \"host\"; changedUnits = the other item units), referenced patch files exist.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "platform", "appVersion", "base", "new", "baseSourceSha", "newSourceSha", "hostChanged", "changedUnits", "idsChanged", "items", "toolchain", "algo", "tools"],
+  "required": ["schema", "platform", "appVersion", "base", "new", "baseSourceSha", "newSourceSha", "deltaMode", "hostChanged", "changedUnits", "idsChanged", "items", "toolchain", "algo", "tools"],
   "properties": {
     "schema": { "const": 1, "description": "patch-report.json format version." },
     "platform": { "enum": ["android", "ios"], "description": "Platform the patches are for." },
@@ -14,6 +14,7 @@
     "new": { "$ref": "#/$defs/hash", "description": "sha256 of the NEW build's build.json." },
     "baseSourceSha": { "type": ["string", "null"], "description": "sourceSha of the base build." },
     "newSourceSha": { "type": ["string", "null"], "description": "sourceSha of the new build." },
+    "deltaMode": { "type": "boolean", "description": "True if the NEW build was compiled with `hermesc -base-bytecode` against the embedded base (build.json delta.enabled); production can monitor the benefit via items[].deltaOverPlain." },
     "hostChanged": { "type": "boolean", "description": "True if the host bundle differs." },
     "changedUnits": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Names of units (not host) whose bundle differs." },
     "idsChanged": { "type": "boolean", "description": "True if ids.json differs between base and new build." },
@@ -33,7 +34,9 @@
           "baseHash": { "$ref": "#/$defs/hash", "description": "sha256 of the base bundle the patch applies to." },
           "ratioOfZstdFull": { "type": "number", "minimum": 0, "description": "patchSize / newZstdSize, rounded to 4 decimals." },
           "deltaPatchSize": { "type": "integer", "minimum": 0, "description": "Size of the delta patch even when `full` was chosen (information)." },
-          "newZstdSize": { "type": "integer", "minimum": 0, "description": "zstd size of the new bundle in bytes." }
+          "newZstdSize": { "type": "integer", "minimum": 0, "description": "zstd size of the new bundle in bytes." },
+          "plainEquivalentSize": { "type": "integer", "minimum": 0, "description": "Only with `patch --report-plain`: size of the delta patch the same JS would have produced compiled WITHOUT -base-bytecode (equals deltaPatchSize for a non-delta build)." },
+          "deltaOverPlain": { "type": "number", "minimum": 0, "description": "Only with `patch --report-plain`: deltaPatchSize / plainEquivalentSize, 4 decimals (below 1 means the delta compile helped)." }
         }
       }
     },

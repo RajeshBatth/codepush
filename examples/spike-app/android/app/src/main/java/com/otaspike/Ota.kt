@@ -50,4 +50,37 @@ object Ota {
     m.optJSONObject("units")?.optJSONObject(key.removePrefix("unit-"))?.let { if (it.has("entryId")) return it.getDouble("entryId") }
     return Double.NaN
   }
+
+  /** spike.json "patches"/"patched" records produced by prepare-spike-assets.mjs (delta-built files + their .hdiff). */
+  class PatchSpec(val key: String, val patchFile: String, val builtHash: String, val baseHash: String, val patchSize: Long, val plainPatchSize: Long)
+
+  fun patch(key: String): PatchSpec {
+    val p = reloadManifest().getJSONObject("patches").getJSONObject(key)
+    return PatchSpec(key, p.getString("file"), p.getString("builtHash"), p.getString("baseHash"), p.getLong("size"), p.getLong("plainBuiltPatchSize"))
+  }
+
+  fun patchedCabsEntryId(): Double = reloadManifest().getJSONObject("patched").getJSONObject("cabs").getDouble("entryId")
+  fun patchedHash(key: String): String = reloadManifest().getJSONObject("patched").getJSONObject(key).getString("hash")
+  fun deltaBuilt(): Boolean = reloadManifest().getJSONObject("patched").optBoolean("deltaBuilt", false)
+  fun expectedHostFn(): String = reloadManifest().getJSONObject("patched").getJSONObject("probe").getString("hostFn")
+
+  // ---- S16/S17: cabs v3 (unit-only edit: new function, new strings, changed string, new module) ----
+  private fun v3() = reloadManifest().getJSONObject("patched").getJSONObject("cabsV3")
+  fun v3Hash(): String = v3().getString("hash")
+  fun v3EntryId(): Double = v3().getDouble("entryId")
+  fun v3UnitFn(): String = v3().getJSONObject("probe").getString("unitFn")
+  fun v3HostChanged(): Boolean = v3().getBoolean("hostChanged")
+  fun v3DeltaBuilt(): Boolean = v3().getBoolean("deltaBuilt")
+  fun v3HostHash(): String = v3().getString("hostHashV3")
+  fun embeddedHostHash(): String = reloadManifest().getJSONObject("host").getString("hash")
+
+  // ---- S18: biglib (real npm packages, ~240 KB unit) ----
+  class BigSpec(val baseFile: String, val builtFile: String, val patchFile: String, val baseHash: String, val builtHash: String, val entryId: Double,
+      val size: Long, val patchSize: Long, val plainPatchSize: Long, val b1: String, val b2: String)
+  fun big(): BigSpec? {
+    val b = reloadManifest().optJSONObject("big") ?: return null
+    return BigSpec(b.getString("baseFile"), b.getString("builtFile"), b.getString("patchFile"), b.getString("baseHash"), b.getString("builtHash"),
+        b.getDouble("entryId"), b.getLong("size"), b.getLong("patchSize"), b.getLong("plainBuiltPatchSize"),
+        b.getJSONObject("probe").getString("b1"), b.getJSONObject("probe").getString("b2"))
+  }
 }

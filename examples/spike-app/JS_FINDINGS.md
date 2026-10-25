@@ -48,7 +48,7 @@ Units are reached ONLY via `lazyUnit('cabs', () => import('../units/cabs/entry')
 
 ## Assets (unresolved, honest)
 * An asset (png) is an ordinary module in the graph: `module.exports = require('@react-native/assets-registry/registry').registerAsset({httpServerLocation: "/assets/src/units/bus/assets", width, height, scales, hash (md5 of the file), name, type})`. It is owned by path, so an asset under a unit root lives in the unit's bundle (ids stable, `bus-icon.png` -> `src/units/bus/assets/bus-icon.png`); an asset outside unit roots (my first attempt, `src/assets/`) silently became HOST-owned. `units.json` lists asset files per owner.
-* The bytes of the image are NOT in any bundle. In a release build Android resolves the registered asset to a drawable resource name derived from `httpServerLocation` + name (`src_units_bus_assets_bus_icon`) and iOS to a file in the app bundle (`assets/src/units/bus/assets/bus-icon.png`), both put there by `react-native bundle --assets-dest` / the Gradle/Xcode bundling step, which this pipeline does not run. Consequences: (1) an OTA unit can only reference assets that are already in the binary; a patch that adds or changes an image breaks (blank image) or needs a side channel; (2) hence `ota-build` must at least fail/warn when a patch's unit has an asset whose sha256 differs from or is absent in the base (data for that is now in `units.json`, the check is not written); (3) remote/URI images or inlining small assets as data URIs are the OTA-friendly options, not designed here. The spike app does not yet put the png into android `res/` or ios resources, so on the device `BUS` renders without the image unless the native agents add it (name above). That is acceptable for the spike (text markers are the pass criteria).
+* The bytes of the image are NOT in any bundle. In a release build Android resolves the registered asset to a drawable resource name derived from `httpServerLocation` + name (`src_units_bus_assets_busicon`) and iOS to a file in the app bundle (`assets/src/units/bus/assets/bus-icon.png`), both put there by `react-native bundle --assets-dest` / the Gradle/Xcode bundling step, which this pipeline does not run. Consequences: (1) an OTA unit can only reference assets that are already in the binary; a patch that adds or changes an image breaks (blank image) or needs a side channel; (2) hence `ota-build` must at least fail/warn when a patch's unit has an asset whose sha256 differs from or is absent in the base (data for that is now in `units.json`, the check is not written); (3) remote/URI images or inlining small assets as data URIs are the OTA-friendly options, not designed here. The spike app does not yet put the png into android `res/` or ios resources, so on the device `BUS` renders without the image unless the native agents add it (name above). That is acceptable for the spike (text markers are the pass criteria).
 * Android resource name collision/ scales and iOS `@2x` handling were not examined.
 
 ## Measurements (hermesc `-O -emit-binary -g0`, zstd-19, HDiffPatch zstd-19 minMatchScore 4; all patches round-tripped by `ota_apply`)
@@ -88,3 +88,26 @@ Embedded vs patched fixtures (what the native tests use) are in `.spike-assets/<
 5. The splitter's Metro is its own copy in packages/unit-splitter/node_modules; the app's copy is only used by the app's config file. They match (0.81.5) here; with a mismatch the second would be silently mixed. A check that both resolve to the same version is not written.
 6. Metro cache is disabled for reproducibility, so every build is cold (5-7 s here; will grow with the app).
 7. `index.js` registers SpikeHost; hybrid-app surfaces opened from native by name (`cabs`) rely on the unit's entry having run (`__otaRequire(entryId)`) before the surface is started; for `bus`/`travelplex` the same.
+
+## Delta-built vs plain-built patches on the real RN host (device run: S11-S15)
+Same edit set built twice against the embedded base (`bundle --base-build`, `--delta on` vs `--delta off`), patch = HDiffPatch zstd-19 via `createPatches`. Edit = host marker string changed + one NEW function (loop, 3 new strings) + a probe line; cabs `v1`->`v2`.
+
+| file | base | plain-built patch | delta-built patch | note |
+|---|---|---|---|---|
+| host.hbc (android, 860 712 B) | embedded | 48 699 B | 5 470 B (x0.11) | new built host 860 928 B, zstd 349 061 B |
+| host.hbc (ios, 854 756 B) | embedded | 43 961 B | 5 429 B (x0.12) | |
+| cabs.hbc (3 328 B) | embedded | 80 B | 139 B | tiny unit: plain is smaller here (string table of a 3 KB unit barely shifts); delta adds a few bytes of base string-table seeding |
+
+The host delta patch (5.4 KB) is larger than the 0.7-1.7 KB in packages/ota-build/README.md because this edit adds a function plus new strings and touches the probe module, not just one literal. Both delta-built outputs were run on an Android emulator (S11/S12) and the on-device `applyPatch` reproduces them bit for bit (S13). Build recipe: the script restores edited sources in a `finally`.
+
+
+## cabs v3: a unit-only edit with a NEW function, NEW strings, a changed string and a NEW module (android)
+
+| file | base | plain-built patch | delta-built patch | note |
+|---|---|---|---|---|
+| cabs.hbc v3 (3 328 -> 4 012 B) | embedded | 1 557 B | 886 B (x0.57) | adds `fareChecksum()` + `unitFn()` (new module), new strings, one changed string |
+| biglib.hbc (262 568 B; lodash+dayjs+semver+ajv closure) one-string edit | its base build | 2 919 B | 426 B (x0.15) | built 262 592 B, new zstd 118 KB-class; S18 |
+
+Host evidence (prepare script hard-fails otherwise): `createPatches` reports `hostChanged=false, changedUnits=[cabs]`, `host.hbc` byte-identical between base and v3 build (sha256 `896c4da52456...`), other units unchanged. Run on the emulator by S16/S17 (see android/SPIKE_ANDROID.md). Ownership gotcha: list a package's full dependency closure in the unit `roots`, otherwise the transitive deps stay host-owned and the unit fails on a host without them.
+
+> Correction (found while implementing the asset rule): RN's `getAndroidResourceIdentifier` strips every character outside `[a-z0-9_]`, so `bus-icon` becomes `busicon`; the Android drawable is `src_units_bus_assets_busicon`. Native glue must take the resource name from `units.json` (`assets[].androidResource`), never derive it by hand.

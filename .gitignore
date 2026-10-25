@@ -27,3 +27,7 @@ dist/
 
 # NOT part of this project: a separate app that lives in the same working folder (has its own .git)
 travel-app/
+
+# work-project specific, kept local
+docs/design/
+examples/chat-gate/

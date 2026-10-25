@@ -101,3 +101,5 @@ Conventions: "implemented" means code plus tests exist in this repo; "planned" m
 3. Re-run the rule-id coverage check whenever `analyze.js`, `checks.js`, `public-api.js` or `verify.ts` change (see the end of [reference/rules-catalog.md](reference/rules-catalog.md) if present, or grep every `rule:`/`check` id).
 4. Keep "implemented / planned" labels honest; update the NOT DONE YET list when something lands.
 5. Keep terminology identical to [glossary.md](glossary.md).
+
+## Design reviews

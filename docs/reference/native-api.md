@@ -69,8 +69,9 @@ One serial "ota queue". `Runtime` methods, `Clock` timer callbacks, `Scheduler` 
 | `hostEmbeddedHash`, `hostBucketKey` | -, `"mainBundle"` | |
 | `units[]` (`UnitConfig{name, embeddedHash, entryModuleId}`) | - | name == RN component == surface name |
 | `hostSettleMs` | 800 | max wait for an in-flight host patch before prewarm |
-| `unitBudgetMs` | 1000 | per-unit wait before falling back to embedded |
+| `unitBudgetMs` | 1000 | default `loadBudgetMs`: wait for an in-flight selected patch before falling back to embedded |
 | `prewarm`, `recreateAtZeroViews` | true, true | |
+| `defaultPolicy`, `unitPolicy[unit]` | `pin=Vm`, `loadBudgetMs=unitBudgetMs`, `fetch=Eager` | per-unit `UnitPolicy` ([05, section 3](../architecture/05-client-runtime.md)); fields are optional and a unit overrides the default field by field; presets `UnitPolicy::latencyFirst()`, `freshnessFirst(ms)`, `stable()` |
 | `crashLimitK` | 2 | unconfirmed process attempts before blacklist |
 | `patchSizeCapCellular` | 512 KiB | larger patches wait for non-metered |
 | `maxConcurrentDownloads`, `maxConcurrentBuilds`, `maxRetries` | 2, 1, 3 | |
@@ -80,7 +81,7 @@ One serial "ota queue". `Runtime` methods, `Clock` timer callbacks, `Scheduler` 
 `Deps{clock, scheduler, worker, http, fs, store, verifier, vm, assets, builder, observer}` are non-owning and must outlive the `Runtime`.
 
 ### 2.4 `Runtime` commands and events
-Commands: `start()` (idempotent), `onFirstPageInteractive()`, `setEntryPointPriority(units)`, `openUnit(unit, propsJson, cb)`, `loadUnit(unit, cb)`, `markReady(unit)`. `OpenResult{ok, error, source ("embedded"|"patch"), patchId}`; callback exactly once, asynchronously. Platform events: `onVmCreated(ok)`, `onVmDestroyed()` (also for destruction not initiated by the runtime), `onSurfaceMounted/Unmounted()`, `onNetworkChanged()`, `onManifestFetched/Failed`, `onDownloadDone(token, bytes)/Failed`. Introspection: `vmState()`, `runningHostId()`, `manifestVersion()`, `deviceId()`, `artifactState(id)`, `isBlacklisted(id)`, `pinOf(unit)`.
+Commands: `start()` (idempotent), `onFirstPageInteractive()`, `setEntryPointPriority(units)`, `openUnit(unit, propsJson, cb)`, `loadUnit(unit, cb)`, `markReady(unit)`. `OpenResult{ok, error, source ("embedded"|"patch"), patchId}`; callback exactly once, asynchronously. Platform events: `onVmCreated(ok)`, `onVmDestroyed()` (also for destruction not initiated by the runtime), `onSurfaceMounted/Unmounted()`, `onNetworkChanged()`, `onManifestFetched/Failed`, `onDownloadDone(token, bytes)/Failed`. Introspection: `vmState()`, `runningHostId()`, `manifestVersion()`, `deviceId()`, `artifactState(id)`, `isBlacklisted(id)`, `pinOf(unit)` (per VM), `frozenOf(unit)` (`""`, `"embedded"`, `"patch:<id>"`: per process).
 
 `Store` keys: `deviceId`, `highestManifestVersion`, `manifest.body|sig|keyId|etag`, `attempts/<id>`, `bad/<id>`, `built/<id>`.
 

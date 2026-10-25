@@ -46,6 +46,28 @@ Test files are bundled in the app (Android: `assets/ota/...`; iOS: bundle resour
 | S9 | `import()` path: JS calls `import('./units/cabs/entry')`, which hits `__loadBundleAsync('cabs')` -> native -> evaluate | Suspense/promise resolves, surface renders |
 | S10 | VM recreate with a different host while no surfaces are mounted (host swap, DESIGN 5.4) | new VM boots from the patched host; previously loaded unit state is gone (probe empty), then S3 works again |
 
+### S11-S15: delta-built bytecode and the on-device patch apply
+
+`prepare-spike-assets.mjs` now also builds `patched/host.hbc` and `patched/units/cabs.hbc` in hermesc DELTA mode (`bundle --base-build <embedded build>`, i.e. `-base-bytecode=<embedded .hbc>`; `spike.json` `patched.deltaBuilt=true`, `patched.deltaBaseBuild`, `patched.deltaFiles`) and writes `patches/{host,cabs}.hdiff` (HDiffPatch zstd via `createPatches`, round trip through `ota_apply`; `spike.json` `patches.<key>.{builtHash,baseHash,size,plainBuiltPatchSize}`). The patched host differs by a changed string (`'embedded'`->`'patched'`), a NEW function `hostPatchedFn` and new strings; `probe.js` publishes `__otaProbe.hostFn = hostPatchedFn(7)` = `"HOSTFN:v2:91:PATCHED"`. The cabs v2 unit renders `CABS:v2` and sets `units.cabs = "v2"`.
+
+| ID | Test | PASS when |
+|----|------|-----------|
+| S11 | Patched unit runs: fresh VM (embedded host), delta-built `patched/units/cabs.hbc` is the FIRST definition of cabs (embedded cabs never loaded) | `units` is `{}` before; probe `units.cabs == "v2"`; surface `CABS:v2`; file sha256 equals spike.json and differs from embedded |
+| S12 | Patched host runs: embedded host has no `hostFn`; boot delta-built `patched/host.hbc` | `host == "patched"`, `hostFn == "HOSTFN:v2:91:PATCHED"` (new function ran), surface `HOST:patched`; delta-built cabs v2 then loads on top (`CABS:v2`) |
+| S13 | Apply on device: otacore `applyPatch(FileSource(embedded), patches/*.hdiff, out, expectedBuiltHash)` for cabs and host | status Ok, sha256(out) == expected built hash == delta-built file hash, no `.tmp`; time and peak RSS logged; the BUILT cabs loads (v2) and the BUILT host boots (`hostFn` ok) |
+| S14 | Bad patch rejected: one byte flipped / file truncated to half (cabs and host) | PatchCorrupt or HashMismatch; no output file; a pre-existing output file is untouched |
+| S15 | Wrong expected hash | HashMismatch, no output file, no `.tmp` |
+
+### S16-S18: a UNIT edit that adds a function and strings never needs a host patch
+
+`prepare-spike-assets.mjs` also builds `patched/units/cabs-v3.hbc` (hermesc DELTA mode vs the embedded build) + `patches/cabs-v3.hdiff`. The v3 edit touches ONLY the cabs unit: (a) NEW function `fareChecksum()` in `fares.js`, (b) NEW string literals, (c) a CHANGED existing string (`Mini 120` -> `Mini fare: 120`), (d) a NEW module file `unitfn.js` (new module id) appended to the unit. The entry publishes `__otaProbe.unitFn = "UNITFN:v3:560:V3:newmod"` and the unit renders `CABS:v3`. The script asserts `createPatches` reports `hostChanged=false, changedUnits=[cabs]` AND that `host.hbc` is byte-identical between the base and v3 builds; both are recorded in `spike.json` (`patched.cabsV3.{deltaBuilt,hostChanged,changedUnits,hostBytesIdentical,hostHashBase,hostHashV3}`, `patches.cabs-v3`). `node scripts/prepare-spike-big.mjs android` (run after the main script) adds the S18 assets (`big/`, `spike.json` `big`).
+
+| ID | Test | PASS when |
+|----|------|-----------|
+| S16 | Fresh VM on the EMBEDDED host (`SpikeHost.Src.Embedded`), delta-built `cabs-v3.hbc` loaded FIRST (embedded cabs never loaded) | host file sha256 == embedded host hash in spike.json == v3-build host hash and unchanged afterwards; `units` was `{}`; `units.cabs == "v3"`; `unitFn` exactly as expected; surface `CABS:v3`; the changed string row (`Mini fare:`) is rendered |
+| S17 | `applyPatch(embedded cabs, patches/cabs-v3.hdiff)` on device (like S13), then the BUILT file in a fresh VM on the embedded host | status Ok, sha256(out) == expected built hash == delta-built file, no `.tmp`; all S16 properties hold for the built file; apply time + RSS logged |
+| S18 | Realistic size: unit `biglib` (lodash + dayjs + semver + ajv and their deps, ~260 KB hbc) through the real splitter/ota-build; probe value is computed with those libs | cold/warm map + check+sha256 + evaluate + require timings; on-device apply of the one-string-edit delta patch (sha256 == built hash), built file loads in a fresh VM (`BIGLIB:b2`) |
+
 Record for the report, per platform: RN/Hermes/Metro versions actually used, any API that did not exist or behaved differently from `docs/research/rn-0.78-loader.md`, and the exact manual steps to run.
 
 ## How to run (the agents fill in exact commands)
