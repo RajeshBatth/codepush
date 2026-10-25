@@ -72,7 +72,7 @@ struct Config {
   int64_t patchSizeCapCellular = 512 * 1024;
   int maxConcurrentDownloads = 2;
   int maxConcurrentBuilds = 1;
-  int maxRetries = 3;  // per artifact: download and build/verify IO failures
+  int maxRetries = 3;  // per patch: download and build/verify IO failures
   Millis backoffBaseMs = 5000, backoffMaxMs = 300000;
   Millis minRefreshMs = 10000, maxRefreshMs = 3600000;
   uint64_t randomSeed = 1;  // jitter + generated deviceId; the platform should pass a random seed
@@ -130,7 +130,7 @@ class Runtime {
   void onVmDestroyed();  // also for VM destruction not initiated by the runtime (lifecycle manager, OS)
   void onSurfaceMounted();
   void onSurfaceUnmounted();
-  void onNetworkChanged();  // e.g. metered -> Wi-Fi: retries artifacts blocked by the cellular cap
+  void onNetworkChanged();  // e.g. metered -> Wi-Fi: retries patches blocked by the cellular cap
   void onManifestFetched(uint64_t token, const ManifestResponse& r);
   void onManifestFailed(uint64_t token, const std::string& reason);
   void onDownloadDone(uint64_t token, int64_t bytes);
@@ -141,7 +141,7 @@ class Runtime {
   std::string runningHostId() const;  // "embedded" when no VM or embedded host
   int64_t manifestVersion() const;    // 0 when no manifest is loaded
   std::string deviceId() const;
-  // Artifact state for an entry id: "absent|queued|downloading|downloaded|verify-pending|building|
+  // Progress of a patch (by its manifest entry id): "absent|queued|downloading|downloaded|verify-pending|building|
   // verifying|ready|failed|bad" or "unknown".
   std::string artifactState(const std::string& entryId) const;
   bool isBlacklisted(const std::string& entryId) const;

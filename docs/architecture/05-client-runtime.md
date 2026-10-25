@@ -42,7 +42,7 @@ All decisions run on one serial queue. Every `Runtime` method, `Clock` timer cal
 
 1. Use the in-memory manifest snapshot (a `shared_ptr`, swapped atomically); never wait for the network. No manifest or cache unavailable: embedded.
 2. `otacore::selectUnit(manifest, unit, ctx)` with `ctx.bucket = bucket(deviceId, unit)`, `embeddedHash`, `supportedAlgos`, `runningHostId`. Reasons: `ok`, `unit-not-in-manifest`, `base-mismatch`, `algo-unsupported`, `no-range-match`, `requires-host-mismatch`. Anything but a usable patch: `select-embedded` event, embedded unit.
-3. Patch artifact `Ready` (built and verified on disk): load it. In flight: wait up to the unit's `loadBudgetMs` (default `unitBudgetMs` = 1000 ms; `0` = never wait, counted from resolution start, after the VM exists), then `budget-exceeded` and embedded; the download continues for next time.
+3. Patch `Ready` (built and verified on disk): load it. In flight: wait up to the unit's `loadBudgetMs` (default `unitBudgetMs` = 1000 ms; `0` = never wait, counted from resolution start, after the VM exists), then `budget-exceeded` and embedded; the download continues for next time.
 4. The result is the unit's **pin** for this VM: `pinOf(unit)` is `""`, `"loading"`, `"embedded"`, `"patch:<id>"` or `"failed"`. Later manifest changes do not affect a pinned unit. Reason it is inherent: Metro's `define` ignores a second definition of an existing module id (spike S6 proved it).
 5. Manifest swaps mid-session only affect units not yet loaded, so unit A can be pinned from an older snapshot than unit B (consistency is per unit, not per session; DESIGN 5.5; test `mixed_snapshots_per_unit_pin`).
 6. **Unit policy** (`Config::defaultPolicy`, `Config::unitPolicy[unit]`, fields override individually): `pin` (`Vm` default | `Process`), `loadBudgetMs` (default `unitBudgetMs`; `0` = latency-first, load embedded at once if the patch is not already built, the patch is used by the next resolution; larger = freshness-first), `fetch` (`Eager` default | `Lazy`: no prefetch, the download starts at the first request and is bounded by `loadBudgetMs`). Presets: `UnitPolicy::latencyFirst()`, `freshnessFirst(ms)`, `stable()`.
@@ -50,11 +50,11 @@ All decisions run on one serial queue. Every `Runtime` method, `Clock` timer cal
 
 `requiresHost` entries are only used if `runningHostId` equals it (test `requires_host_skipped_until_vm_runs_host`). Prefetch resolves `requiresHost` against the host the runtime is heading to.
 
-## 4. Artifacts: download, build, verify
+## 4. Patches: download, build, verify
 
-Every host or unit patch entry becomes an artifact with states `absent|queued|downloading|downloaded|verify-pending|building|verifying|ready|failed|bad` (`Runtime::artifactState`). Flow: download patch -> `PatchBuilder::build(old=embedded source, patch, out=cache/<id>.bundle, expectedHash=entry.hash)` on a `Worker` -> `ready`. A built file already on disk goes `verify-pending -> verifying -> ready` (sha256 once per process, on a worker, never at tap time). `updateType: "full"` uses an empty old source with the same apply code (test `full_update_type_uses_empty_old_source`).
+Every host or unit patch entry becomes a patch (tracked by `PatchState`) with stages `absent|queued|downloading|downloaded|verify-pending|building|verifying|ready|failed|bad` (`Runtime::artifactState`). Flow: download patch -> `PatchBuilder::build(old=embedded source, patch, out=cache/<id>.bundle, expectedHash=entry.hash)` on a `Worker` -> `ready`. A built file already on disk goes `verify-pending -> verifying -> ready` (sha256 once per process, on a worker, never at tap time). `updateType: "full"` uses an empty old source with the same apply code (test `full_update_type_uses_empty_old_source`).
 
-* Download order: host, then `setEntryPointPriority` list, then the rest; a tapped unit's artifact is promoted. `maxConcurrentDownloads=2`, `maxConcurrentBuilds=1`.
+* Download order: host, then `setEntryPointPriority` list, then the rest; a tapped unit's patch is promoted. `maxConcurrentDownloads=2`, `maxConcurrentBuilds=1`.
 * Metered network and patch size above `patchSizeCapCellular` (512 KiB): deferred until `onNetworkChanged` (`download-blocked-metered`).
 * Manifest `size` is the **patch** size (download size); built size is stored locally under `built/<id>`.
 * IO errors are transient: jittered backoff up to `maxRetries` (3), reset on the next manifest swap, never persisted as bad. Hash mismatch, corrupt patch and pre-evaluate failures are persisted (`bad/<id>`).
@@ -64,11 +64,11 @@ Every host or unit patch entry becomes an artifact with states `absent|queued|do
 
 All must pass before bytes reach Hermes; failure persists the id as bad and loads embedded:
 
-1. artifact state is `ready`; path under the cache root, no `..` (`path-escape`);
+1. patch stage is `ready`; path under the cache root, no `..` (`path-escape`);
 2. `FileSystem::map` succeeds (`map-failed` is transient, not persisted);
 3. size equals the recorded built size (`size-mismatch`);
 4. `checkHermesBytecode` (`hermes.h`): 4-byte aligned (`misaligned`), at least 12 bytes (`too-small`), magic `0x1F1903C103BC1FC6` at offset 0 (`bad-magic`; otherwise Hermes would compile the bytes as JS **source**), u32 LE version at offset 8 equals `Config::bytecodeVersion` (`bad-version`).
-5. sha256 of the built file was verified in the artifact stage.
+5. sha256 of the built file was verified in the build stage.
 
 Then `bumpAttempt(id)` (persisted first; failure uses embedded, event `attempt-persist-failed`), `VmController::evaluateUnit`, `VmController::requireEntry`. An `evaluateUnit` failure registered nothing, so the VM is clean and embedded is evaluated. A `requireEntry` failure after a successful evaluate **pollutes the VM** (modules are registered; embedded cannot override): the patch is marked bad, that call fails, `poisoned=true` and the VM is recreated at the next zero-views moment (test `entry_failure_poisons_vm`). If the embedded unit itself fails, the pin is `failed` and the error is reported once, no loop.
 

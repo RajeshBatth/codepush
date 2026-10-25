@@ -35,7 +35,11 @@ Two files are both called `units.json` and are unrelated: the **governance** fil
 | **`base.json`** | Written by the base release job: per platform hashes of host and each unit, `hbc {bytecodeVersion, hermescSha256}`, zstd sizes, `retired` flag | [file-formats](reference/file-formats.md) |
 | **baseHash** | sha256 of the embedded unit (or host) a patch applies to; the client ignores a patch whose `baseHash` differs from the embedded bytes | manifest `units[].baseHash`, `mainBundle.baseHash` |
 | **built hash** | sha256 of the result of applying the patch to the embedded unit (manifest entry field `hash`). Verified on device; must be reproducible, patch bytes need not be | `Entry.hash` in `types.ts` |
-| **patch** | HDiffPatch "single compressed diff" (zstd) from the embedded unit to the new unit, `patchAlgoVer` `v1` | `packages/ota-build/src/patch.ts`; [ADR-0003](architecture/decisions/README.md) |
+| **patch** | One update for a unit or the host: listed in the manifest, rolled out by percentage, can be halted. It consists of a **diff file** (HDiffPatch "single compressed diff", zstd, `patchAlgoVer` `v1`, from the embedded bundle to the new one) that the device turns into a **built bundle** | `packages/ota-build/src/patch.ts`, manifest `entries[]` |
+| **diff file** | The small downloaded file of a patch; applying it to the embedded bundle yields the built bundle | `native/otacore/src/patch.cpp` |
+| **built bundle** / built file | The bytecode a device actually runs for a patch: the diff applied to the embedded bundle, sha256-verified against the manifest `hash` | `Cache::builtPath` |
+| **`PatchState`** | The on-device progress record of one patch (queued, downloading, building, ready, failed, bad). Not a build or CI artifact | `runtime.cpp` |
+| **manifest entry** | One patch as listed in the signed manifest (`otacore::Entry`). Not the same as a unit's "entry module" | `otacore.h` |
 | **`full` update** (`updateType: "full"`) | Same diff format computed against an EMPTY old file (whole replacement), emitted when `patchSize > 0.6 x zstdSize(new)`; same apply code on device | `patch.ts` (`fullThreshold`), `types.ts` (`UpdateType`) |
 | **`patchAlgoVer`** | Manifest string naming the diff algorithm and parameters (`v1`); changing any parameter needs a new value and a new binary | `patch.ts` |
 | **`build.json`** | Output of `ota-build bundle` per platform: toolchain, hashes and sizes of `host.hbc` and `units/*.hbc`, `entryModuleId` | [file-formats](reference/file-formats.md) |

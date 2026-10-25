@@ -51,10 +51,10 @@ the matching `Runtime::on*` with `req.token`. `VmController::createVm/destroyVm`
 * Manifest accept = signature -> `parseManifest` -> platform/appVersion match -> `version >= highest` (equal is
   idempotent) -> persist `highest` (fail closed) -> swap -> replan -> GC. Any failure keeps the old manifest.
   Refresh: conditional GET, next fetch after `ttlSec` (+0..10%, clamped), failures use equal-jitter exponential backoff.
-* Artifacts (host and units): Queued -> Downloading -> Downloaded -> Building -> Ready, or (built file already on disk)
+* Patches (host and units; the per-patch progress record is `PatchState`): Queued -> Downloading -> Downloaded -> Building -> Ready, or (built file already on disk)
   VerifyPending -> Verifying -> Ready. Hash verified once per process on a worker, never at tap time. IO errors are
   transient (bounded retries, never persisted); hash/corrupt/pre-evaluate failures are persisted as bad.
-  Download order: host, `setEntryPointPriority` list, the rest; a tapped unit's artifact is promoted. Over the
+  Download order: host, `setEntryPointPriority` list, the rest; a tapped unit's patch is promoted. Over the
   cellular size cap on a metered network: deferred until `onNetworkChanged`.
 * `openUnit`: ensure VM -> select (current snapshot, running host id) -> patch Ready: pre-evaluate checks, bump
   `attempts` (persisted first), evaluate; patch in flight: wait the unit's `loadBudgetMs` (default `unitBudgetMs`; 0 = never wait) then embedded; evaluate failure of a

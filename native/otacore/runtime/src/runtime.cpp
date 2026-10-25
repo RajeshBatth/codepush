@@ -1,4 +1,68 @@
 // OTA runtime orchestrator. Everything here runs on the single ota queue (see interfaces.h).
+//
+// ====================================================================================================
+// READING GUIDE (written for people who are not fluent in C++)
+// ====================================================================================================
+// WHAT THIS FILE IS
+//   The "brain" of the on-device OTA client. It decides, for every unit (a patchable slice of the app) and
+//   for the host bundle, whether to run the code that is EMBEDDED in the app binary or a downloaded PATCH,
+//   and it drives everything needed to get there: fetching the manifest, downloading and building patches,
+//   creating/replacing the React Native VM, and evaluating unit code into it.
+//
+//   It does NO real I/O itself. Every side effect goes through an interface from interfaces.h held in `d`
+//   (d.http, d.fs, d.store, d.vm, d.clock, ...). Android/iOS implement those; tests use fakes. That is why
+//   you will see calls like `d.vm->createVm(...)`: "ask the platform to do X". The answer usually comes back
+//   LATER as an event (onVmCreated, onDownloadDone, ...), never as a return value.
+//
+//   Single thread: all code here runs on one serial queue, so there are no locks. Slow work (applying a
+//   patch) is handed to d.worker and its result is posted back to the queue.
+//
+// VOCABULARY
+//   embedded  the copy of a bundle that ships inside the app binary. Always the safe fallback.
+//   host      the main JS bundle (everything outside units). Booting a VM uses embedded or a patched host.
+//   unit      a separately patchable JS slice (e.g. "travelplex"), loaded into a running VM on demand.
+//   patch     one update we ship for a unit or the host. It is listed in the signed manifest, rolled out by
+//             percentage, and can be halted. Our local progress record for it is `PatchState`
+//             (queued -> downloading -> building -> ready).
+//   diff file the small file downloaded from the CDN for a patch.
+//   built     the result of applying the diff file to the embedded bundle: the bytecode we actually run.
+//   manifest entry  one patch as listed in the signed manifest. `snap` is the latest verified manifest.
+//   pin       the decision "unit X runs embedded / patch P in this VM" (struct UnitPin). Fixed per VM.
+//   prewarm   creating the VM in the background before the user taps, so the first tap is fast.
+//   poisoned  a VM in which a patch half-registered its modules and then threw; it must be replaced.
+//
+// C++ SYNTAX YOU WILL MEET
+//   `d.vm->createVm(x)`        call a method through a pointer (`->` instead of `.`).
+//   `auto it = m.find(k);`     look a key up in a map; `it == m.end()` means "not found", `it->second` is the value.
+//   `[this, id] { ... }`       a "lambda": a small unnamed function written inline, usually a callback that runs
+//                              LATER. The `[...]` lists what it captures from the surrounding code.
+//   `std::move(x)`             hand x over to someone else without copying it (x is empty afterwards).
+//   `const std::string&`       a read-only reference: the string is not copied.
+//   `std::optional<T>`         a value that may be unset; `.value_or(d)` = the value, or d when unset.
+//   `std::shared_ptr<T>`       a reference-counted pointer; the object is freed when the last holder drops it.
+//   `alive` (see Impl)         callbacks can fire after the Runtime is destroyed; each checks `*alive` first.
+//   `Impl`                     the real implementation. The public class `Runtime` (runtime.h) just forwards
+//                              to it (bottom of this file) so the header stays small.
+//
+// MAP OF THIS FILE (top to bottom)
+//   1. small types            PatchState / Op / UnitPin / Frozen
+//   2. helpers                events, timers, policy lookups
+//   3. crash-loop guard       blacklist + "attempt" counters
+//   4. start-up               restore saved state, first manifest fetch
+//   5. manifest               verify -> accept -> refresh timer
+//   6. patch pipeline         plan what to fetch, download, build, verify, settle, cache GC
+//   7. pre-evaluate checks    last safety net before bytes reach Hermes
+//   8. prewarm + VM lifecycle create / replace the VM
+//   9. openUnit / loadUnit    decide embedded vs patch for one unit, evaluate it, answer the caller
+//
+// TYPICAL LAUNCH, IN ORDER
+//   start()                   -> restore cached manifest, kick off a refresh      (never blocks the UI)
+//   onFirstPageInteractive()  -> maybe prewarm the VM
+//   onManifestFetched()       -> verified manifest -> replan() -> pump() downloads/builds patches
+//   openUnit("chat")          -> resolve(): patch ready? use it. Still building? wait up to the unit's budget,
+//                                then fall back to embedded. -> evaluate -> mount the screen
+//   markReady("chat")         -> JS rendered its first frame: the patch is confirmed healthy
+// ====================================================================================================
 #include "otaruntime/runtime.h"
 
 #include <algorithm>
@@ -20,36 +84,37 @@ std::string kAttempts(const std::string& id) { return "attempts/" + id; }
 std::string kBad(const std::string& id) { return "bad/" + id; }
 std::string kBuilt(const std::string& id) { return "built/" + id; }
 
-// Artifact lifecycle: Queued -> Downloading -> Downloaded -> Building -> Ready
+// Stage of a patch. Lifecycle: Queued -> Downloading -> Downloaded -> Building -> Ready
 //                     (built file already on disk) VerifyPending -> Verifying -> Ready
 //                     transient IO trouble -> Failed (maybe retried), corrupt/unsafe -> Bad (persisted)
-enum class AS { Absent, Queued, Downloading, Downloaded, VerifyPending, Building, Verifying, Ready, Failed, Bad };
+enum class Stage { Absent, Queued, Downloading, Downloaded, VerifyPending, Building, Verifying, Ready, Failed, Bad };
 
-const char* asName(AS s) {
+const char* stageName(Stage s) {
   switch (s) {
-    case AS::Absent: return "absent";
-    case AS::Queued: return "queued";
-    case AS::Downloading: return "downloading";
-    case AS::Downloaded: return "downloaded";
-    case AS::VerifyPending: return "verify-pending";
-    case AS::Building: return "building";
-    case AS::Verifying: return "verifying";
-    case AS::Ready: return "ready";
-    case AS::Failed: return "failed";
-    case AS::Bad: return "bad";
+    case Stage::Absent: return "absent";
+    case Stage::Queued: return "queued";
+    case Stage::Downloading: return "downloading";
+    case Stage::Downloaded: return "downloaded";
+    case Stage::VerifyPending: return "verify-pending";
+    case Stage::Building: return "building";
+    case Stage::Verifying: return "verifying";
+    case Stage::Ready: return "ready";
+    case Stage::Failed: return "failed";
+    case Stage::Bad: return "bad";
   }
   return "?";
 }
-// States in which the artifact is expected to become Ready soon (a load may wait for it).
-bool waitable(AS s) {
-  return s == AS::Queued || s == AS::Downloading || s == AS::Downloaded || s == AS::VerifyPending ||
-         s == AS::Building || s == AS::Verifying;
+// States in which the patch is expected to become Ready soon (a load may wait for it).
+bool waitable(Stage s) {
+  return s == Stage::Queued || s == Stage::Downloading || s == Stage::Downloaded || s == Stage::VerifyPending ||
+         s == Stage::Building || s == Stage::Verifying;
 }
 // States that touch files on disk right now (cache GC must not run).
-bool busy(AS s) { return s == AS::Downloading || s == AS::Downloaded || s == AS::Building || s == AS::Verifying; }
+bool busy(Stage s) { return s == Stage::Downloading || s == Stage::Downloaded || s == Stage::Building || s == Stage::Verifying; }
 
-struct Art {
-  AS s = AS::Absent;
+// Progress record for one patch we are tracking (host or unit). Created by considerEntry().
+struct PatchState {
+  Stage s = Stage::Absent;
   std::string id, url, hash, updateType, target;  // target: "host" or unit name (embedded asset name)
   int64_t size = 0;                               // patch size from the manifest
   int64_t builtSize = -1;                         // size of the built file (recorded at build time)
@@ -62,12 +127,16 @@ struct Art {
   bool blocked = false;  // held back by the cellular size cap
 };
 
+// A request from native code that is waiting for an answer: openUnit (open=true: also mount the screen) or loadUnit
+// (open=false: only evaluate the unit into the running VM). `cb` is called exactly once with the outcome.
 struct Op {
   bool open = false;
   std::string unit, props;
   OpenCallback cb;
 };
 
+// The decision for one unit in the CURRENT VM: Loading (still deciding/waiting), Loaded (done, `patch` says which
+// code runs) or Failed. `waiters` are the requests to answer once the state settles. Discarded with the VM.
 struct UnitPin {
   enum St { Loading, Loaded, Failed } st = Loading;
   bool patch = false;
@@ -77,7 +146,8 @@ struct UnitPin {
   std::string reason;  // why this outcome (for the freeze event)
 };
 
-// Per-process selection freeze (README "Per-process selection freeze").
+// Remembered choice for units with pin=Process: survives VM recreation within one process (see UnitPolicy::pin).
+// Units with the default pin=Vm never use this; they re-decide for every new VM.
 struct Frozen {
   bool patch = false;
   std::string id, hash;
@@ -100,6 +170,8 @@ const char* vmStateName(VmState s) {
 struct Runtime::Impl {
   Config cfg;
   Deps d;
+  // Becomes false when this object is destroyed. Timers/worker callbacks may still fire afterwards, so each one
+  // checks `*alive` before touching `this` (otherwise it would use freed memory).
   std::shared_ptr<bool> alive = std::make_shared<bool>(true);
 
   bool started = false, cacheOk = false, firstPage = false;
@@ -108,40 +180,43 @@ struct Runtime::Impl {
   uint64_t rngState;
 
   // manifest
-  std::shared_ptr<const otacore::Manifest> snap;
-  int64_t highest = 0;
+  std::shared_ptr<const otacore::Manifest> snap;  // latest VERIFIED manifest (null until one is accepted)
+  int64_t highest = 0;                            // highest manifest version ever accepted; older ones are replays
   std::string etag;
   uint64_t tokenCtr = 0, mfToken = 0;
   int mfFailures = 0;
   TimerId refreshTimer = 0;
 
-  // persisted-state mirrors
-  std::set<std::string> bad, attempted;
-  std::map<std::string, double> buckets;
+  // persisted-state mirrors (the durable copy lives in d.store; these are the in-memory view)
+  std::set<std::string> bad;        // patch ids that must never run again (blacklist)
+  std::set<std::string> attempted;  // patch ids already counted as an "attempt" in THIS process
+  std::map<std::string, double> buckets;  // cache of this device's rollout bucket per unit
 
-  // artifacts
-  std::map<std::string, Art> arts;
-  std::map<uint64_t, std::string> tokenToArt;
+  // patches
+  std::map<std::string, PatchState> patches;  // patch id -> its progress
+  std::map<uint64_t, std::string> tokenToPatch;
   int activeDl = 0, activeBuild = 0;
-  uint64_t artSeq = 0;
-  std::vector<std::string> priority;
+  uint64_t patchSeq = 0;
+  std::vector<std::string> priority;  // units reachable from visible entry points, most important first
   bool gcPending = false, gcScheduled = false;
 
   // VM
   VmState vm = VmState::None;
-  std::string runningHost = kEmbedded, pendingHost = kEmbedded;
-  std::map<std::string, UnitPin> pins;
-  std::map<std::string, Frozen> frozen;  // process lifetime; survives VM recreation
-  std::vector<Op> pendingOps;
-  bool pendingRecreate = false, poisoned = false, settleExpired = false;
-  TimerId settleTimer = 0;
+  std::string runningHost = kEmbedded, pendingHost = kEmbedded;  // host id the VM runs / is being created from
+  std::map<std::string, UnitPin> pins;   // unit -> decision in the current VM (cleared when the VM goes away)
+  std::map<std::string, Frozen> frozen;  // process lifetime; survives VM recreation (pin=Process units only)
+  std::vector<Op> pendingOps;            // requests that arrived while the VM was being created/replaced
+  bool pendingRecreate = false;          // we want to replace the VM as soon as it is safe (no screens open)
+  bool poisoned = false;                 // current VM is unusable (see vocabulary); replace it
+  bool settleExpired = false;            // we already waited hostSettleMs for a host patch; never wait again
+  TimerId settleTimer = 0;               // the hostSettleMs wait (0 = none running)
 
   Impl(Config c, Deps deps) : cfg(std::move(c)), d(deps), rngState(cfg.randomSeed ? cfg.randomSeed : 88172645463325252ull) {}
   ~Impl() {
     *alive = false;
     if (refreshTimer) d.clock->cancel(refreshTimer);
     if (settleTimer) d.clock->cancel(settleTimer);
-    for (auto& kv : arts) if (kv.second.retryTimer) d.clock->cancel(kv.second.retryTimer);
+    for (auto& kv : patches) if (kv.second.retryTimer) d.clock->cancel(kv.second.retryTimer);
     for (auto& kv : pins) if (kv.second.timer) d.clock->cancel(kv.second.timer);
   }
 
@@ -152,9 +227,11 @@ struct Runtime::Impl {
   }
   double r01() { return double(rnd() >> 11) * (1.0 / 9007199254740992.0); }
 
+  // Report something that happened to the app's Observer (logging/telemetry). Purely informational.
   void emit(const char* kind, const std::string& unit = "", const std::string& id = "", const std::string& detail = "") {
     if (d.observer) d.observer->onEvent(Event{kind, unit, id, detail});
   }
+  // Run `fn` after `ms` milliseconds, unless this object was destroyed meanwhile. Returns a timer id for cancelTimer.
   TimerId after(Millis ms, std::function<void()> fn) {
     auto a = alive;
     return d.clock->schedule(ms, [a, fn = std::move(fn)] { if (*a) fn(); });
@@ -163,6 +240,8 @@ struct Runtime::Impl {
     if (t) d.clock->cancel(t);
     t = 0;
   }
+  // Answer a caller. Always deferred via the scheduler (posted), never called inline, so callers can rely on
+  // "the callback never runs inside the method I just called".
   void complete(OpenCallback& cb, OpenResult r) {
     if (!cb) return;
     auto a = alive;
@@ -173,6 +252,8 @@ struct Runtime::Impl {
     r.error = err;
     complete(op.cb, std::move(r));
   }
+  // Retry delay after the n-th failure: base * 2^(n-1), capped, then randomized to [50%,100%] so that many devices
+  // that failed together do not all retry at the same instant.
   Millis backoff(int n) {
     Millis dl = cfg.backoffBaseMs;
     for (int i = 1; i < n && dl < cfg.backoffMaxMs; i++) dl *= 2;
@@ -183,6 +264,7 @@ struct Runtime::Impl {
     for (auto& u : cfg.units) if (u.name == n) return &u;
     return nullptr;
   }
+  // This device's stable position (0..1) for a unit; a rollout of "30%" reaches devices whose bucket is below 0.3.
   double bucketOf(const std::string& key) {
     auto it = buckets.find(key);
     if (it != buckets.end()) return it->second;
@@ -204,6 +286,7 @@ struct Runtime::Impl {
     c.runningHostId = kEmbedded;
     return c;
   }
+  // How many units are currently deciding/waiting. A VM must not be replaced while any load is in flight.
   int loadsInFlight() const {
     int n = 0;
     for (auto& kv : pins) if (kv.second.st == UnitPin::Loading) n++;
@@ -226,8 +309,11 @@ struct Runtime::Impl {
     if (it != cfg.unitPolicy.end() && it->second.fetch) return *it->second.fetch;
     return cfg.defaultPolicy.fetch.value_or(Fetch::Eager);
   }
+  // true for units with pin=Process ("freeze" is the older name for the process-wide lock).
   bool freezes(const std::string& unit) const { return pinOfUnit(unit) == Pin::Process; }
   const char* scopeName(const std::string& unit) const { return freezes(unit) ? "process" : "vm"; }
+  // Called when a unit finished loading: report the decision, and for pin=Process units also remember it
+  // in `frozen` so the next VM in this process reuses it.
   void freezeNow(const std::string& unit, const UnitPin& pin) {
     const std::string detail = std::string(pin.patch ? "patch" : "embedded") + ":" + pin.reason + " scope=" + scopeName(unit);
     if (!freezes(unit)) {  // pin=vm: the selection is fixed for this VM only (nothing is memoized)
@@ -262,6 +348,12 @@ struct Runtime::Impl {
   }
 
   // ------------------------------------------------------------------ crash-loop guard / blacklist
+  // How we protect users from a patch that crashes the app:
+  //   1. BEFORE running a patch we persist "attempts[id] += 1" (bumpAttempt).
+  //   2. When JS renders its first frame, markReady() erases the counter: the patch is proven healthy.
+  //   3. If the process dies first, the counter survives. On the next start, a counter >= crashLimitK means the
+  //      patch crashed us K times without ever confirming: it is blacklisted for good (`bad/<id>`) and embedded
+  //      code runs instead.
   void markBadId(const std::string& id, const std::string& why) {
     bad.insert(id);
     d.store->put(kBad(id), why);  // best effort: in-memory flag already protects this process
@@ -274,9 +366,9 @@ struct Runtime::Impl {
   }
   void markBad(const std::string& id, const std::string& why) {
     markBadId(id, why);
-    auto it = arts.find(id);
-    if (it != arts.end()) {
-      it->second.s = AS::Bad;
+    auto it = patches.find(id);
+    if (it != patches.end()) {
+      it->second.s = Stage::Bad;
       cancelTimer(it->second.retryTimer);
       settle(id);
     }
@@ -286,7 +378,7 @@ struct Runtime::Impl {
     if (!d.store->get(kAttempts(id), v)) return 0;
     return std::atoi(v.c_str());
   }
-  // Usable = not blacklisted. Also applies the crash limit to ids first seen after start().
+  // Usable = we may consider running this patch: not blacklisted, and the cache works. Also applies the crash limit to ids first seen after start().
   bool usable(const otacore::Entry& e) {
     if (!cacheOk || cache->builtPath(e.id).empty()) return false;
     if (bad.count(e.id)) return false;
@@ -306,6 +398,9 @@ struct Runtime::Impl {
   }
 
   // ------------------------------------------------------------------ start-up
+  // App launch. Restores everything saved by earlier runs (device id, last good manifest, blacklist, crash
+  // counters), then asks the network for a fresh manifest. Nothing here waits for the network: the app keeps
+  // running on embedded code (or on a patch that is already on disk) while the refresh happens.
   void start() {
     if (started) return;
     started = true;
@@ -343,6 +438,8 @@ struct Runtime::Impl {
     doRefresh();
   }
 
+  // Re-verify and adopt the manifest saved by the last run, so patches already on disk can be used on a cold
+  // start before (or without) any network. It goes through the same signature/replay checks as a fresh one.
   void loadCached() {
     std::string body, sig, key, et;
     if (!d.store->get("manifest.body", body) || !d.store->get("manifest.sig", sig)) return;
@@ -380,6 +477,8 @@ struct Runtime::Impl {
     return Acc::Applied;
   }
 
+  // Ask the CDN for the manifest (conditional request: "only if changed", via the saved ETag).
+  // Only one request at a time (`mfToken` is nonzero while one is running).
   void doRefresh() {
     if (mfToken) return;
     mfToken = ++tokenCtr;
@@ -405,6 +504,8 @@ struct Runtime::Impl {
     scheduleRefresh(backoff(mfFailures));
   }
 
+  // Network answer for the manifest. `token` identifies which request this answers; stale tokens are ignored.
+  // On success the device re-plans its patches; on any rejection the OLD manifest stays in force (fail safe).
   void onManifestFetched(uint64_t token, const ManifestResponse& r) {
     if (token != mfToken || !token) return;
     mfToken = 0;
@@ -434,6 +535,8 @@ struct Runtime::Impl {
     refreshFailed();
   }
 
+  // A newer manifest was adopted: recompute what to download, maybe schedule a VM replace (new host patch),
+  // and clean up cache files the new manifest no longer references.
   void afterSwap() {
     gcPending = true;
     replan(true);
@@ -441,7 +544,9 @@ struct Runtime::Impl {
     scheduleGc();
   }
 
-  // ------------------------------------------------------------------ artifacts: plan, download, build
+  // ------------------------------------------------------------------ patches: plan, download, build
+  // Which host the VM will run (or runs): the selected host patch if usable, else the currently running host.
+  // Used so unit selection ("requiresHost") matches the host that the unit will actually load into.
   std::string targetHostId() {
     if (snap && cacheOk) {
       auto sel = otacore::selectHost(*snap, hostCtx());
@@ -450,38 +555,41 @@ struct Runtime::Impl {
     return runningHost;
   }
 
+  // Make sure there is an patch record for this manifest entry. A patch already built on disk goes straight to
+  // verification (VerifyPending); otherwise it is Queued for download. `rank` is its download priority (lower =
+  // sooner); -1 means a user is waiting for it right now and sticks.
   void considerEntry(const otacore::Entry& e, bool isHost, const std::string& target, int rank, bool resetFailed) {
     if (!usable(e)) return;
-    auto it = arts.find(e.id);
-    if (it != arts.end() && it->second.hash != e.hash) {  // same id, different content: start over
+    auto it = patches.find(e.id);
+    if (it != patches.end() && it->second.hash != e.hash) {  // same id, different content: start over
       if (busy(it->second.s)) return;
       cancelTimer(it->second.retryTimer);
       if (cacheOk) d.fs->remove(cache->builtPath(e.id));
-      arts.erase(it);
-      it = arts.end();
+      patches.erase(it);
+      it = patches.end();
     }
-    if (it == arts.end()) {
-      Art a;
+    if (it == patches.end()) {
+      PatchState a;
       a.id = e.id; a.url = e.patchUrl; a.hash = e.hash; a.updateType = e.updateType; a.size = e.size;
-      a.target = target; a.isHost = isHost; a.rank = rank; a.seq = ++artSeq;
+      a.target = target; a.isHost = isHost; a.rank = rank; a.seq = ++patchSeq;
       if (cache->has(e.id)) {
-        a.s = AS::VerifyPending;
+        a.s = Stage::VerifyPending;
         std::string v;
         if (d.store->get(kBuilt(e.id), v)) a.builtSize = std::atoll(v.c_str());
-      } else a.s = AS::Queued;
-      arts[e.id] = a;
+      } else a.s = Stage::Queued;
+      patches[e.id] = a;
       return;
     }
-    Art& a = it->second;
+    PatchState& a = it->second;
     if (a.rank >= 0) a.rank = rank;  // rank -1 (promoted: a user is waiting) sticks
-    if (resetFailed && a.s == AS::Failed) {
+    if (resetFailed && a.s == Stage::Failed) {
       cancelTimer(a.retryTimer);
       a.retries = 0;
-      a.s = cache->has(e.id) ? AS::VerifyPending : AS::Queued;
+      a.s = cache->has(e.id) ? Stage::VerifyPending : Stage::Queued;
     }
   }
 
-  // (Re)computes which artifacts this device wants, in prefetch order: host, priority units, the rest.
+  // (Re)computes which patches this device wants, in prefetch order: host, priority units, the rest.
   void replan(bool resetFailed) {
     if (!snap || !cacheOk) return;
     auto hs = otacore::selectHost(*snap, hostCtx());
@@ -498,7 +606,7 @@ struct Runtime::Impl {
     for (const UnitConfig* u : order) {
       auto sel = otacore::selectUnit(*snap, u->name, unitCtx(*u, tgt));
       // fetch=lazy: no download before the first request; a patch already on disk is only verified.
-      if (sel.source == otacore::Source::Patch && fetchOf(u->name) == Fetch::Lazy && !arts.count(sel.entry->id) &&
+      if (sel.source == otacore::Source::Patch && fetchOf(u->name) == Fetch::Lazy && !patches.count(sel.entry->id) &&
           !cache->has(sel.entry->id)) { rank++; continue; }
       if (sel.source == otacore::Source::Patch) considerEntry(*sel.entry, false, u->name, rank, resetFailed);
       rank++;
@@ -515,34 +623,38 @@ struct Runtime::Impl {
     for (auto& u : cfg.units) names.push_back(u.name);
     for (auto& n : names) {
       if (!seen.insert(n).second) continue;
-      for (auto& kv : arts) if (!kv.second.isHost && kv.second.target == n && kv.second.rank >= 0) kv.second.rank = rank;
+      for (auto& kv : patches) if (!kv.second.isHost && kv.second.target == n && kv.second.rank >= 0) kv.second.rank = rank;
       rank++;
     }
     pump();
   }
 
-  Art* pickBest(AS s1, AS s2) {
-    Art* best = nullptr;
-    for (auto& kv : arts) {
-      Art& a = kv.second;
+  // Of all patches in state s1 or s2, the one to work on next: lowest rank, then oldest.
+  PatchState* pickBest(Stage s1, Stage s2) {
+    PatchState* best = nullptr;
+    for (auto& kv : patches) {
+      PatchState& a = kv.second;
       if (a.s != s1 && a.s != s2) continue;
       if (!best || a.rank < best->rank || (a.rank == best->rank && a.seq < best->seq)) best = &a;
     }
     return best;
   }
 
+  // The work scheduler: start as many builds and downloads as the concurrency limits allow. Called after
+  // anything that could unblock work (plan changed, download finished, build finished, network changed).
+  // Builds are started before downloads; on a metered network, downloads over the cellular size cap are held back.
   void pump() {
     if (!cacheOk) return;
     while (activeBuild < cfg.maxConcurrentBuilds) {
-      Art* a = pickBest(AS::Downloaded, AS::VerifyPending);
+      PatchState* a = pickBest(Stage::Downloaded, Stage::VerifyPending);
       if (!a) break;
       startWork(*a);
     }
     while (activeDl < cfg.maxConcurrentDownloads) {
-      Art* a = pickBest(AS::Queued, AS::Queued);
+      PatchState* a = pickBest(Stage::Queued, Stage::Queued);
       if (!a) break;
       if (d.http->isMetered() && a->size > cfg.patchSizeCapCellular) {
-        a->s = AS::Absent;
+        a->s = Stage::Absent;
         a->blocked = true;
         emit("download-blocked-metered", "", a->id);
         settle(a->id);
@@ -552,11 +664,12 @@ struct Runtime::Impl {
     }
   }
 
-  void startDownload(Art& a) {
-    a.s = AS::Downloading;
+  // Ask the platform to download the patch file into the cache. The result arrives as onDownloadDone/Failed.
+  void startDownload(PatchState& a) {
+    a.s = Stage::Downloading;
     a.blocked = false;
     a.token = ++tokenCtr;
-    tokenToArt[a.token] = a.id;
+    tokenToPatch[a.token] = a.id;
     activeDl++;
     std::string dest = cache->patchPath(a.id);
     d.fs->remove(dest);
@@ -566,53 +679,54 @@ struct Runtime::Impl {
     d.http->download(r);
   }
 
+  // The platform finished a download. Size must match the manifest exactly; otherwise treat as a transient failure.
   void onDownloadDone(uint64_t token, int64_t bytes) {
-    auto t = tokenToArt.find(token);
-    if (t == tokenToArt.end()) return;
+    auto t = tokenToPatch.find(token);
+    if (t == tokenToPatch.end()) return;
     std::string id = t->second;
-    tokenToArt.erase(t);
+    tokenToPatch.erase(t);
     activeDl--;
-    auto it = arts.find(id);
-    if (it == arts.end() || it->second.s != AS::Downloading) { pump(); return; }
-    Art& a = it->second;
+    auto it = patches.find(id);
+    if (it == patches.end() || it->second.s != Stage::Downloading) { pump(); return; }
+    PatchState& a = it->second;
     if (bytes != a.size || d.fs->fileSize(cache->patchPath(id)) != a.size) {
       d.fs->remove(cache->patchPath(id));
       emit("download-failed", a.target, id, "size-mismatch");
-      failTransient(id, AS::Queued);
+      failTransient(id, Stage::Queued);
     } else {
       emit("download-done", a.target, id);
-      a.s = AS::Downloaded;
+      a.s = Stage::Downloaded;
     }
     pump();
   }
   void onDownloadFailed(uint64_t token, const std::string& reason) {
-    auto t = tokenToArt.find(token);
-    if (t == tokenToArt.end()) return;
+    auto t = tokenToPatch.find(token);
+    if (t == tokenToPatch.end()) return;
     std::string id = t->second;
-    tokenToArt.erase(t);
+    tokenToPatch.erase(t);
     activeDl--;
-    auto it = arts.find(id);
-    if (it != arts.end() && it->second.s == AS::Downloading) {
+    auto it = patches.find(id);
+    if (it != patches.end() && it->second.s == Stage::Downloading) {
       d.fs->remove(cache->patchPath(id));
       emit("download-failed", it->second.target, id, reason);
-      failTransient(id, AS::Queued);
+      failTransient(id, Stage::Queued);
     }
     pump();
   }
 
   // Transient failure: retry with jittered backoff up to maxRetries, then stay Failed until the next
   // manifest swap resets it. Never persisted as bad.
-  void failTransient(const std::string& id, AS retryTo) {
-    auto it = arts.find(id);
-    if (it == arts.end()) return;
-    Art& a = it->second;
+  void failTransient(const std::string& id, Stage retryTo) {
+    auto it = patches.find(id);
+    if (it == patches.end()) return;
+    PatchState& a = it->second;
     a.retries++;
-    a.s = AS::Failed;
+    a.s = Stage::Failed;
     cancelTimer(a.retryTimer);
     if (a.retries <= cfg.maxRetries) {
       a.retryTimer = after(backoff(a.retries), [this, id, retryTo] {
-        auto i = arts.find(id);
-        if (i == arts.end() || i->second.s != AS::Failed) return;
+        auto i = patches.find(id);
+        if (i == patches.end() || i->second.s != Stage::Failed) return;
         i->second.retryTimer = 0;
         i->second.s = retryTo;
         pump();
@@ -627,9 +741,13 @@ struct Runtime::Impl {
     int64_t size = -1;
   };
 
-  void startWork(Art& a) {
-    const bool build = a.s == AS::Downloaded;
-    a.s = build ? AS::Building : AS::Verifying;
+  // Slow step, done OFF the ota queue on a worker thread:
+  //   build  : apply the downloaded diff to the embedded file -> writes the "built" file, sha256-checked by applyPatch
+  //   verify : a built file from an earlier run is on disk; re-check its size and sha256 before trusting it
+  // The worker only touches local copies (never `this`); the outcome comes back to finishWork on the ota queue.
+  void startWork(PatchState& a) {
+    const bool build = a.s == Stage::Downloaded;
+    a.s = build ? Stage::Building : Stage::Verifying;
     activeBuild++;
     emit(build ? "build-start" : "verify-start", a.target, a.id);
     auto res = std::make_shared<WorkResult>();
@@ -676,16 +794,18 @@ struct Runtime::Impl {
     });
   }
 
+  // Back on the ota queue with the worker's outcome. IO trouble => retry later (transient). Corrupt/unsafe
+  // result => the patch is blacklisted for good. Success => Ready, and anyone waiting for it is woken (settle).
   void finishWork(const std::string& id, bool build, const WorkResult& r) {
     activeBuild--;
-    auto it = arts.find(id);
+    auto it = patches.find(id);
     if (build && cacheOk) d.fs->remove(cache->patchPath(id));  // patch file is not needed after the build
-    if (it == arts.end()) { pump(); return; }
-    Art& a = it->second;
+    if (it == patches.end()) { pump(); return; }
+    PatchState& a = it->second;
     using S = otacore::Status;
     if (r.st == S::IoError) {
       emit("build-failed", a.target, id, "io-error");
-      failTransient(id, build ? AS::Queued : AS::VerifyPending);
+      failTransient(id, build ? Stage::Queued : Stage::VerifyPending);
     } else if (r.st != S::Ok || !r.pathOk || !r.hashOk || r.size < 0) {
       std::string why = r.st != S::Ok ? otacore::statusName(r.st) : !r.pathOk ? "path-escape" : "hash-or-size-mismatch";
       emit("build-failed", a.target, id, why);
@@ -693,7 +813,7 @@ struct Runtime::Impl {
     } else {
       a.builtSize = r.size;
       d.store->put(kBuilt(id), std::to_string(r.size));
-      a.s = AS::Ready;
+      a.s = Stage::Ready;
       a.retries = 0;
       emit(build ? "build-ok" : "verify-ok", a.target, id);
       settle(id);
@@ -701,24 +821,24 @@ struct Runtime::Impl {
     pump();
   }
 
-  // An artifact reached Ready/Bad/Failed/blocked: wake loads, prewarm and host recreate; schedule GC.
+  // An patch reached Ready/Bad/Failed/blocked: wake loads, prewarm and host recreate; schedule GC.
   void settle(const std::string& id) {
-    auto it = arts.find(id);
-    if (it == arts.end()) return;
-    const AS st = it->second.s;
+    auto it = patches.find(id);
+    if (it == patches.end()) return;
+    const Stage st = it->second.s;
     const bool isHost = it->second.isHost;
     std::vector<std::string> units;
     for (auto& kv : pins) if (kv.second.st == UnitPin::Loading && kv.second.waitingArt == id) units.push_back(kv.first);
     for (auto& u : units) {
       UnitPin& pin = pins[u];
-      if (st == AS::Ready) {
+      if (st == Stage::Ready) {
         cancelTimer(pin.timer);
         pin.waitingArt.clear();
         loadPatchIntoPin(u, id);
       } else if (!waitable(st)) {
         cancelTimer(pin.timer);
         pin.waitingArt.clear();
-        evaluateEmbedded(u, "artifact-unavailable");
+        evaluateEmbedded(u, "patch-unavailable");
       }
     }
     if (isHost) {
@@ -728,6 +848,8 @@ struct Runtime::Impl {
     scheduleGc();
   }
 
+  // Cache garbage collection: delete files for patches that the current manifest no longer lists. Deferred to a
+  // later queue turn, and skipped while any file is being written.
   void scheduleGc() {
     if (!gcPending || gcScheduled) return;
     gcScheduled = true;
@@ -740,12 +862,12 @@ struct Runtime::Impl {
   }
   void runGc() {
     if (!gcPending || !cacheOk || !snap) return;
-    for (auto& kv : arts) if (busy(kv.second.s)) return;  // retried when the busy artifact settles
+    for (auto& kv : patches) if (busy(kv.second.s)) return;  // retried when the busy patch settles
     std::vector<std::string> keep = otacore::allEntryIds(*snap);
     std::set<std::string> ref(keep.begin(), keep.end());
     size_t removed = cache->gc(keep);
-    for (auto it = arts.begin(); it != arts.end();) {
-      if (!ref.count(it->first)) { cancelTimer(it->second.retryTimer); it = arts.erase(it); }
+    for (auto it = patches.begin(); it != patches.end();) {
+      if (!ref.count(it->first)) { cancelTimer(it->second.retryTimer); it = patches.erase(it); }
       else ++it;
     }
     for (auto& k : d.store->keys("attempts/")) if (!ref.count(k.substr(9))) d.store->erase(k);
@@ -754,26 +876,29 @@ struct Runtime::Impl {
     emit("gc", "", "", std::to_string(removed));
   }
 
+  // Network type changed (e.g. cellular -> Wi-Fi): retry downloads that were held back by the cellular size cap.
   void onNetworkChanged() {
     bool any = false;
-    for (auto& kv : arts) {
-      if (kv.second.s == AS::Absent && kv.second.blocked) { kv.second.s = AS::Queued; any = true; }
+    for (auto& kv : patches) {
+      if (kv.second.s == Stage::Absent && kv.second.blocked) { kv.second.s = Stage::Queued; any = true; }
     }
     if (any) pump();
   }
 
   // ------------------------------------------------------------------ pre-evaluate checks (DESIGN 5.8)
+  // Last safety net before bytes are handed to Hermes (which would execute them). `persistent` in the result says
+  // whether a failure is the PATCH's fault (blacklist it) or a passing environment problem (don't blame it).
   struct Check {
     bool ok = false, persistent = false;
     std::string why;
     std::shared_ptr<const Buffer> buf;
   };
-  // The once-per-process content checks (hash, size, canonical path) already ran when the artifact became
+  // The once-per-process content checks (hash, size, canonical path) already ran when the patch became
   // Ready; here: lexical path, map, expected size, 4-byte alignment, Hermes magic and version.
   Check preEvaluate(const std::string& id) {
     Check c;
-    auto it = arts.find(id);
-    if (it == arts.end() || it->second.s != AS::Ready) { c.why = "not-ready"; return c; }
+    auto it = patches.find(id);
+    if (it == patches.end() || it->second.s != Stage::Ready) { c.why = "not-ready"; return c; }
     std::string path = cache->builtPath(id);
     const std::string root = cache->root() + "/";
     if (path.compare(0, root.size(), root) != 0 || path.find("..") != std::string::npos) {
@@ -789,18 +914,44 @@ struct Runtime::Impl {
   }
 
   // ------------------------------------------------------------------ prewarm and VM lifecycle
+  // True when the manifest picked a host patch for this device and it is still on its way (queued, downloading,
+  // building or verifying). False if there is no manifest yet, no host patch, it is blacklisted, or already done.
   bool hostWaiting() {
     if (!snap || !cacheOk) return false;
     auto sel = otacore::selectHost(*snap, hostCtx());
     if (sel.source != otacore::Source::Patch || bad.count(sel.entry->id)) return false;
-    auto it = arts.find(sel.entry->id);
-    return it != arts.end() && waitable(it->second.s);
+    auto it = patches.find(sel.entry->id);
+    return it != patches.end() && waitable(it->second.s);
   }
 
+  // Native tells us: "the first (native) page of the app is on screen and usable".
+  //
+  // Why this exists: creating the React Native VM costs hundreds of milliseconds and a lot of CPU. If we did it
+  // during app start-up it would slow the very first screen, which is native and must never wait on anything. If we
+  // waited for the user to tap an RN entry point (e.g. "Chat"), the first tap would pay the full VM startup.
+  // So we create the VM in the background right AFTER the first page is interactive ("prewarm"): out of the way of
+  // start-up, but usually ready before the first tap. This method just records that moment and tries to prewarm.
   void onFirstPageInteractive() {
     firstPage = true;
     tryPrewarm();
   }
+
+  // Create the VM in the background if (and only if) now is a good moment. Safe to call repeatedly; it is called
+  // again whenever something changes (first page up, host patch became ready, wait timer fired).
+  //
+  // The one real decision: should we create the VM from the EMBEDDED host or wait briefly for a PATCHED host?
+  //   * A VM runs exactly one host bundle for its whole life; changing the host means destroying the VM and
+  //     creating a new one (see considerRecreate). So if a host patch is just about to be ready and we prewarm
+  //     right now, we boot the old host, then throw that VM away moments later: wasted work and a visible stall.
+  //   * But we also must not delay prewarm indefinitely: the patch may be big, the network slow, or the CDN down.
+  // Compromise: if a host patch is selected and still in flight (hostWaiting), wait at most hostSettleMs
+  // (~800 ms). If it becomes ready sooner, settle() calls us again and we boot straight from the patched host.
+  // If the timer fires first, we prewarm with what is on disk (usually embedded); the patch will be picked up
+  // at the next safe moment (VM replaced when no screen is open). We never wait on a manifest that has not arrived
+  // (no manifest => hostWaiting() is false => prewarm immediately), and we only ever wait ONCE per process
+  // (settleExpired), so this adds at most hostSettleMs to prewarm and never delays the first page or any tap.
+  //
+  // If the user taps an entry point while we are waiting, submit() creates the VM at once and cancels the wait.
   void tryPrewarm() {
     if (!started || !cfg.prewarm || !firstPage || vm != VmState::None) return;
     if (hostWaiting() && !settleExpired) {
@@ -819,6 +970,8 @@ struct Runtime::Impl {
   }
 
   // Chooses the host from disk only (never the network) and asks the platform to create the VM.
+  // Patched host used only if: selected for this device, not blacklisted, already built, passes pre-evaluate
+  // checks, and its "attempt" was persisted (so a crash while booting it is counted). Otherwise: embedded host.
   void startCreate() {
     cancelTimer(settleTimer);
     vm = VmState::Creating;
@@ -828,8 +981,8 @@ struct Runtime::Impl {
       auto sel = otacore::selectHost(*snap, hostCtx());
       if (sel.source == otacore::Source::Patch && usable(*sel.entry)) {
         const std::string id = sel.entry->id;
-        auto it = arts.find(id);
-        if (it != arts.end() && it->second.s == AS::Ready) {
+        auto it = patches.find(id);
+        if (it != patches.end() && it->second.s == Stage::Ready) {
           Check c = preEvaluate(id);
           if (!c.ok) {
             if (c.persistent) markBad(id, c.why);
@@ -846,6 +999,9 @@ struct Runtime::Impl {
     d.vm->createVm(hs);
   }
 
+  // The platform reports the result of createVm. On success, answer all requests that queued up meanwhile. If a
+  // PATCHED host failed to boot, blacklist it and immediately retry once with the embedded host (never leave the
+  // app without a working VM because of a bad patch).
   void onVmCreated(bool ok) {
     if (vm != VmState::Creating) return;
     if (ok) {
@@ -870,6 +1026,7 @@ struct Runtime::Impl {
     for (auto& op : ops) fail(op, "vm-create-failed");
   }
 
+  // The VM is gone, so every per-VM decision is void: forget the pins and fail requests still waiting on them.
   void dropPins(const char* err) {
     auto old = std::move(pins);
     pins.clear();
@@ -879,6 +1036,8 @@ struct Runtime::Impl {
     }
   }
 
+  // The VM was destroyed (by us, the OS, or the app's lifecycle manager). If WE destroyed it to switch hosts
+  // (state Destroying), create the replacement now; otherwise go back to "no VM" until someone needs one.
   void onVmDestroyed() {
     const bool recreating = vm == VmState::Destroying;
     dropPins("vm-destroyed");
@@ -893,13 +1052,14 @@ struct Runtime::Impl {
     }
   }
 
+  // Is a better host ready than the one running? (a different, usable, fully built host patch)
   bool hostUpgradeAvailable() {
     if (!snap || !cacheOk) return false;
     auto sel = otacore::selectHost(*snap, hostCtx());
     if (sel.source != otacore::Source::Patch || sel.entry->id == runningHost) return false;
     if (bad.count(sel.entry->id) || !usable(*sel.entry)) return false;
-    auto it = arts.find(sel.entry->id);
-    return it != arts.end() && it->second.s == AS::Ready;
+    auto it = patches.find(sel.entry->id);
+    return it != patches.end() && it->second.s == Stage::Ready;
   }
 
   // 5.4: recreate only with zero mounted views and no load in flight; remember the wish for the next
@@ -912,6 +1072,7 @@ struct Runtime::Impl {
     if (!loads && !views) { beginRecreate(); return; }
     pendingRecreate = poisoned || cfg.recreateAtZeroViews || (loads && (pendingRecreate || readyMoment));
   }
+  // Destroy the VM so onVmDestroyed can create a new one from the new host. While Destroying, new requests queue.
   void beginRecreate() {
     pendingRecreate = false;
     vm = VmState::Destroying;  // recreate lock: openUnit calls queue until the new VM is up
@@ -920,6 +1081,8 @@ struct Runtime::Impl {
   }
 
   // ------------------------------------------------------------------ openUnit / loadUnit
+  // Entry point for native requests. If the VM is ready, handle now; if it is being created/replaced, queue until it
+  // is up; if there is no VM, an openUnit creates one (a tap never waits for prewarm), a loadUnit fails ("no-vm").
   void submit(Op op) {
     if (!started) { fail(op, "not-started"); return; }
     switch (vm) {
@@ -934,6 +1097,8 @@ struct Runtime::Impl {
     }
   }
 
+  // Handle one request on a running VM. The first request for a unit starts the decision (resolve); requests that
+  // arrive while it is pending just wait on the same decision, so the unit is evaluated at most once per VM.
   void runOp(Op op) {
     const std::string unit = op.unit;
     if (!findUnit(unit)) { fail(op, "unknown-unit"); return; }
@@ -967,8 +1132,8 @@ struct Runtime::Impl {
       return sel.source == otacore::Source::Patch ? "range-excluded" : sel.reason;
     }
     if (!usable(*found)) return "blacklisted";  // crash-loop limit applied now
-    auto it = arts.find(f.id);
-    if (it == arts.end() || it->second.s != AS::Ready) return "file-missing";
+    auto it = patches.find(f.id);
+    if (it == patches.end() || it->second.s != Stage::Ready) return "file-missing";
     Check c = preEvaluate(f.id);
     if (!c.ok) {
       if (c.persistent) markBad(f.id, c.why);
@@ -977,6 +1142,17 @@ struct Runtime::Impl {
     return "";
   }
 
+  // THE central decision for one unit in this VM: embedded or patch? In order:
+  //   1. pin=Process and a remembered choice exists  -> reuse it if still safe (frozenPatchProblem), else drop it.
+  //   2. no verified manifest / no cache             -> embedded.
+  //   3. manifest selects embedded for this device   -> embedded (not in rollout, halted, wrong host, ...).
+  //   4. selected patch is blacklisted               -> embedded.
+  //   5. patch already built                         -> load it now.
+  //   6. patch unusable (bad/failed)                 -> embedded.
+  //   7. patch still downloading/building            -> latency-first unit (budget 0): embedded now, the patch is
+  //      used by a later resolution; otherwise wait up to `loadBudgetMs`, loading the patch the moment it is
+  //      ready (settle) or falling back to embedded when the timer expires. The user is waiting, so the patch
+  //      is promoted to the front of the download queue (rank -1).
   void resolve(const std::string& unit) {
     const UnitConfig* uc = findUnit(unit);
     if (freezes(unit)) {
@@ -1008,16 +1184,16 @@ struct Runtime::Impl {
     }
     const otacore::Entry e = *sel.entry;
     considerEntry(e, false, unit, -1, false);
-    auto it = arts.find(e.id);
-    if (it == arts.end()) { evaluateEmbedded(unit, "artifact-missing"); return; }
+    auto it = patches.find(e.id);
+    if (it == patches.end()) { evaluateEmbedded(unit, "patch-missing"); return; }
     it->second.rank = -1;  // the user is waiting: promote ahead of prefetch
-    if (it->second.s == AS::Absent) it->second.s = AS::Queued;
-    if (it->second.s == AS::Queued) pump();
-    it = arts.find(e.id);
-    if (it == arts.end()) { evaluateEmbedded(unit, "artifact-missing"); return; }
+    if (it->second.s == Stage::Absent) it->second.s = Stage::Queued;
+    if (it->second.s == Stage::Queued) pump();
+    it = patches.find(e.id);
+    if (it == patches.end()) { evaluateEmbedded(unit, "patch-missing"); return; }
     switch (it->second.s) {
-      case AS::Ready: pins[unit].reason = "ok"; loadPatchIntoPin(unit, e.id); return;
-      case AS::Bad: case AS::Failed: case AS::Absent: evaluateEmbedded(unit, "artifact-unavailable"); return;
+      case Stage::Ready: pins[unit].reason = "ok"; loadPatchIntoPin(unit, e.id); return;
+      case Stage::Bad: case Stage::Failed: case Stage::Absent: evaluateEmbedded(unit, "patch-unavailable"); return;
       default: break;
     }
     const Millis budget = budgetOf(unit);
@@ -1039,6 +1215,10 @@ struct Runtime::Impl {
     });
   }
 
+  // Run the built patch in the VM: pre-evaluate checks -> persist the crash-guard attempt -> evaluate the bytecode
+  // -> run the unit's entry module. Each failure blacklists the patch and falls back to embedded. The exception:
+  // if the ENTRY module throws, the patch's modules are already registered in the VM and Metro ignores a second
+  // definition, so embedded cannot override them; the VM is marked poisoned and replaced, and this request fails.
   void loadPatchIntoPin(const std::string& unit, const std::string& id) {
     const UnitConfig* uc = findUnit(unit);
     UnitPin& pin = pins[unit];
@@ -1084,6 +1264,7 @@ struct Runtime::Impl {
     serve(unit);
   }
 
+  // Run the unit's embedded (shipped-in-the-binary) bytecode. `why` records the reason for the choice (events only).
   void evaluateEmbedded(const std::string& unit, const std::string& why) {
     const UnitConfig* uc = findUnit(unit);
     UnitPin& pin = pins[unit];
@@ -1109,6 +1290,8 @@ struct Runtime::Impl {
     serve(unit);
   }
 
+  // The unit's decision is final (Loaded or Failed): answer every request waiting on it. openUnit also mounts the
+  // screen (mountSurface); loadUnit just reports success. Callbacks are posted, not called inline (see complete).
   void serve(const std::string& unit) {
     auto ws = std::move(pins[unit].waiters);
     pins[unit].waiters.clear();
@@ -1132,6 +1315,8 @@ struct Runtime::Impl {
     if (pendingRecreate) considerRecreate(false);
   }
 
+  // JS rendered the unit's first frame: the code is healthy. Clear the crash-guard counter of the patch (and of
+  // the booted host patch, which is also proven by a healthy RN surface).
   void markReady(const std::string& unit) {
     auto it = pins.find(unit);
     if (it == pins.end() || it->second.st != UnitPin::Loaded) return;
@@ -1185,8 +1370,8 @@ std::string Runtime::runningHostId() const { return p_->runningHost; }
 int64_t Runtime::manifestVersion() const { return p_->snap ? p_->snap->version : 0; }
 std::string Runtime::deviceId() const { return p_->deviceId; }
 std::string Runtime::artifactState(const std::string& id) const {
-  auto it = p_->arts.find(id);
-  return it == p_->arts.end() ? "unknown" : asName(it->second.s);
+  auto it = p_->patches.find(id);
+  return it == p_->patches.end() ? "unknown" : stageName(it->second.s);
 }
 bool Runtime::isBlacklisted(const std::string& id) const { return p_->bad.count(id) > 0; }
 std::string Runtime::frozenOf(const std::string& unit) const {
