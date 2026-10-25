@@ -2,7 +2,7 @@
 # Included from the top-level CMakeLists.txt. Targets: otaruntime (library), test_runtime (scenarios).
 
 set(RT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/otacore/runtime)
-add_library(otaruntime STATIC ${RT_DIR}/src/runtime.cpp ${RT_DIR}/src/defaults.cpp)
+add_library(otaruntime STATIC ${RT_DIR}/src/runtime.cpp ${RT_DIR}/src/runtime_support.cpp ${RT_DIR}/src/crash_guard.cpp ${RT_DIR}/src/manifest_sync.cpp ${RT_DIR}/src/patch_pipeline.cpp ${RT_DIR}/src/vm_lifecycle.cpp ${RT_DIR}/src/unit_loader.cpp ${RT_DIR}/src/defaults.cpp)
 target_include_directories(otaruntime PUBLIC ${RT_DIR}/include)
 target_link_libraries(otaruntime PUBLIC otacore)
 target_compile_options(otaruntime PRIVATE -Wall -Wextra -Wshadow)

@@ -38,7 +38,7 @@ Two files are both called `units.json` and are unrelated: the **governance** fil
 | **patch** | One update for a unit or the host: listed in the manifest, rolled out by percentage, can be halted. It consists of a **diff file** (HDiffPatch "single compressed diff", zstd, `patchAlgoVer` `v1`, from the embedded bundle to the new one) that the device turns into a **built bundle** | `packages/ota-build/src/patch.ts`, manifest `entries[]` |
 | **diff file** | The small downloaded file of a patch; applying it to the embedded bundle yields the built bundle | `native/otacore/src/patch.cpp` |
 | **built bundle** / built file | The bytecode a device actually runs for a patch: the diff applied to the embedded bundle, sha256-verified against the manifest `hash` | `Cache::builtPath` |
-| **`PatchState`** | The on-device progress record of one patch (queued, downloading, building, ready, failed, bad). Not a build or CI artifact | `runtime.cpp` |
+| **`PatchState`** | The on-device progress record of one patch (queued, downloading, building, ready, failed, bad). Not a build or CI artifact | `runtime_impl.h` |
 | **manifest entry** | One patch as listed in the signed manifest (`otacore::Entry`). Not the same as a unit's "entry module" | `otacore.h` |
 | **`full` update** (`updateType: "full"`) | Same diff format computed against an EMPTY old file (whole replacement), emitted when `patchSize > 0.6 x zstdSize(new)`; same apply code on device | `patch.ts` (`fullThreshold`), `types.ts` (`UpdateType`) |
 | **`patchAlgoVer`** | Manifest string naming the diff algorithm and parameters (`v1`); changing any parameter needs a new value and a new binary | `patch.ts` |

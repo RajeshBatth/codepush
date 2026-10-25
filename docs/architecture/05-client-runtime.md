@@ -2,7 +2,7 @@
 
 **Purpose:** How a device decides which host and unit bytes to run, loads them into the Hermes VM and protects itself; what is implemented in C++ and what is still platform glue.
 **Audience:** Native engineers (Android/iOS), SDK implementers, AI assistants editing `native/`.
-**Source of truth:** `native/otacore/runtime/{README.md,include/otaruntime/*,src/runtime.cpp}`, `native/otacore/include/otacore/`, `native/tests/runtime/*` (53 scenarios), `examples/spike-app/shared/*`, DESIGN.md sections 5.1-5.9 ([DESIGN.md](../../DESIGN.md)).
+**Source of truth:** `native/otacore/runtime/{README.md,include/otaruntime/*,src/*.cpp, src/runtime_impl.h}`, `native/otacore/include/otacore/`, `native/tests/runtime/*` (53 scenarios), `examples/spike-app/shared/*`, DESIGN.md sections 5.1-5.9 ([DESIGN.md](../../DESIGN.md)).
 
 Related: [native-api reference](../reference/native-api.md), [platform integration guide](../guides/android-ios-integration.md), [spike results](../spikes/summary.md), [safety table](06-safety-and-failure-modes.md), [manifest and signing](03-manifest-state-and-signing.md), [glossary](../glossary.md).
 
@@ -38,7 +38,7 @@ All decisions run on one serial queue. Every `Runtime` method, `Clock` timer cal
 
 ## 3. Resolution, unit policy and pin scope
 
-`Runtime::resolve` (runtime.cpp) implements DESIGN 5.2 for one unit:
+`Runtime::Impl::resolve` (`unit_loader.cpp`) implements DESIGN 5.2 for one unit:
 
 1. Use the in-memory manifest snapshot (a `shared_ptr`, swapped atomically); never wait for the network. No manifest or cache unavailable: embedded.
 2. `otacore::selectUnit(manifest, unit, ctx)` with `ctx.bucket = bucket(deviceId, unit)`, `embeddedHash`, `supportedAlgos`, `runningHostId`. Reasons: `ok`, `unit-not-in-manifest`, `base-mismatch`, `algo-unsupported`, `no-range-match`, `requires-host-mismatch`. Anything but a usable patch: `select-embedded` event, embedded unit.

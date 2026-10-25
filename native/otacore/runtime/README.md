@@ -9,7 +9,9 @@ include/otaruntime/interfaces.h   Clock Scheduler Worker Http FileSystem Store S
 include/otaruntime/runtime.h      Config, Deps, Runtime
 include/otaruntime/hermes.h       bytecode header check (magic, version, alignment)
 include/otaruntime/defaults.h     StdFileSystem, DefaultPatchBuilder (otacore::applyPatch), aligned Buffer
-src/runtime.cpp                   the whole state machine (one file, pimpl)
+src/runtime_impl.h                shared state + method list + reading guide (internal)
+src/runtime.cpp                   public API forwarding (pimpl)
+src/{runtime_support,crash_guard,manifest_sync,patch_pipeline,vm_lifecycle,unit_loader}.cpp   the state machine, one file per concern
 ```
 
 ## Threading model

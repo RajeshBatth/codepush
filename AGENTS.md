@@ -49,7 +49,7 @@ Expected today: ota-core 166 (+ typecheck), ota-cli 76, unit-splitter 103, ota-b
 | New static check / rule | `packages/unit-splitter/src/{analyze,checks,public-api}.js`; config key in `checks.js` | negative + positive tests in `packages/unit-splitter/test/`, `docs/reference/rules-catalog.md`, `schemas/units.config.schema.json` (+ fixtures/drift test) |
 | New manifest/state field | `packages/ota-core/src/{types,manifest,state}.ts` | `schemas/*.json`, `schemas/fixtures` (`npm run schemas:fixtures`), `native/otacore` parser + `vectors/`, `docs/reference/file-formats.md` |
 | New storage/CDN/KMS backend | implement ports in `packages/ota-cli/src/ports.ts` | run `test/conformance/*` against it (see `docs/reference/ports-and-adapters.md`) |
-| Loader behavior | `native/otacore/runtime` | add a deterministic scenario test in `native/tests/runtime/`, update `docs/architecture/05-client-runtime.md` |
+| Loader behavior | `native/otacore/runtime` (start at the reading guide in `src/runtime_impl.h`; one file per concern) | add a deterministic scenario test in `native/tests/runtime/`, update `docs/architecture/05-client-runtime.md` |
 | Patch algorithm / flags | `packages/ota-build/src/patch.ts`, `native/otacore/src/patch.cpp` | bump `patchAlgoVer`, round-trip tests, ADR |
 
 ## Conventions
